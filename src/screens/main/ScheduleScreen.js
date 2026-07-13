@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   View,
   Text,
@@ -6,68 +6,93 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Bell,
   Sun,
+  Moon,
   Pill,
   ChevronRight,
   Plus,
 } from 'lucide-react-native';
-import { medications } from '../../data/mockData';
+import {useFocusEffect} from '@react-navigation/native';
+import {getApiConfig} from '../../services/config';
+import {
+  api,
+  buildTodayDoses,
+  initials,
+  todayIsoDate,
+} from '../../services/api';
 
-const ScheduleScreen = ({ navigation }) => {
-  const morningMeds = medications.filter(m => m.period === 'MORNING');
-  const afternoonMeds = medications.filter(m => m.period === 'AFTERNOON');
+const ScheduleScreen = ({navigation}) => {
+  const [userName, setUserName] = useState('Patient');
+  const [doses, setDoses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [adherencePct, setAdherencePct] = useState(0);
 
-  return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
+  const load = useCallback(async () => {
+    try {
+      const cfg = await getApiConfig();
+      setUserName(cfg.userName || 'Patient');
+      if (!cfg.userId) {
+        setError('Select a user in Settings → Device Connection.');
+        setDoses([]);
+        return;
+      }
+      const [schedules, logs] = await Promise.all([
+        api.getSchedules(cfg.userId),
+        api.getAdherence(cfg.userId, todayIsoDate()),
+      ]);
+      const today = buildTodayDoses(schedules, logs);
+      setDoses(today);
+      const taken = today.filter(d => d.status === 'taken').length;
+      setAdherencePct(
+        today.length === 0 ? 0 : Math.round((taken / today.length) * 100),
+      );
+      setError('');
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>M</Text>
-          </View>
-          <View>
-            <Text style={styles.patientLabel}>Patient</Text>
-            <Text style={styles.userName}>Maxwell</Text>
-          </View>
-        </View>
-        <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
-          <Bell size={24} color="#374151" />
-        </TouchableOpacity>
-      </View>
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      load();
+    }, [load]),
+  );
 
-      {/* Title */}
-      <View style={styles.titleRow}>
-        <View>
-          <Text style={styles.protocolLabel}>TODAY'S PROTOCOL</Text>
-          <Text style={styles.title}>Medication Schedule</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => navigation.navigate('AddMedication')}>
-          <Plus size={16} color="#FFFFFF" />
-          <Text style={styles.addButtonText}>Add Med</Text>
-        </TouchableOpacity>
-      </View>
+  const morningMeds = doses.filter(m => m.period === 'MORNING');
+  const afternoonMeds = doses.filter(m => m.period === 'AFTERNOON');
+  const eveningMeds = doses.filter(
+    m => m.period === 'EVENING' || m.period === 'OTHER',
+  );
 
-      {/* Morning Section */}
+  const renderSection = (title, subtitle, icon, meds, iconBg) => {
+    if (!meds.length) return null;
+    return (
       <View style={styles.periodSection}>
         <View style={styles.periodHeader}>
-          <View style={styles.periodIconContainer}>
-            <Sun size={20} color="#F59E0B" />
+          <View style={[styles.periodIconContainer, {backgroundColor: iconBg}]}>
+            {icon}
           </View>
           <View>
-            <Text style={styles.periodTitle}>MORNING</Text>
-            <Text style={styles.periodTime}>06:00 - 11:00</Text>
+            <Text style={styles.periodTitle}>{title}</Text>
+            <Text style={styles.periodTime}>{subtitle}</Text>
           </View>
         </View>
-
-        {morningMeds.map(med => (
-          <TouchableOpacity key={med.id} style={styles.medCard}>
+        {meds.map(med => (
+          <TouchableOpacity
+            key={med.id}
+            style={styles.medCard}
+            onPress={() => navigation.navigate('Verify')}>
             <View
               style={[
                 styles.medStatusBar,
@@ -87,7 +112,7 @@ const ScheduleScreen = ({ navigation }) => {
             <View style={styles.medInfo}>
               <Text style={styles.medName}>{med.name}</Text>
               <Text style={styles.medSub}>
-                {med.dosage} • {med.time}
+                {med.dosage || 'Dose'} • {med.time} • {med.status}
               </Text>
             </View>
             <View style={styles.slotBadge}>
@@ -97,53 +122,99 @@ const ScheduleScreen = ({ navigation }) => {
           </TouchableOpacity>
         ))}
       </View>
+    );
+  };
 
-      {/* Afternoon Section */}
-      <View style={styles.periodSection}>
-        <View style={styles.periodHeader}>
-          <View style={[styles.periodIconContainer, { backgroundColor: '#FEF3C7' }]}>
-            <Sun size={20} color="#D97706" />
+  return (
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            load();
+          }}
+        />
+      }>
+      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
+
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials(userName)}</Text>
           </View>
           <View>
-            <Text style={styles.periodTitle}>AFTERNOON</Text>
-            <Text style={styles.periodTime}>12:00 - 17:00</Text>
+            <Text style={styles.patientLabel}>Patient</Text>
+            <Text style={styles.userName}>{userName}</Text>
           </View>
         </View>
+        <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
+          <Bell size={24} color="#374151" />
+        </TouchableOpacity>
+      </View>
 
-        {afternoonMeds.map(med => (
-          <TouchableOpacity key={med.id} style={styles.medCard}>
-            <View style={[styles.medStatusBar, { backgroundColor: '#F59E0B' }]} />
-            <View style={styles.medIconContainer}>
-              <Pill size={20} color="#6B7280" />
-            </View>
-            <View style={styles.medInfo}>
-              <Text style={styles.medName}>{med.name}</Text>
-              <Text style={styles.medSub}>
-                {med.dosage} • {med.time}
+      <View style={styles.titleRow}>
+        <View>
+          <Text style={styles.protocolLabel}>TODAY'S PROTOCOL</Text>
+          <Text style={styles.title}>Medication Schedule</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => navigation.navigate('AddMedication')}>
+          <Plus size={16} color="#FFFFFF" />
+          <Text style={styles.addButtonText}>Add Med</Text>
+        </TouchableOpacity>
+      </View>
+
+      {!!error && <Text style={styles.errorText}>{error}</Text>}
+
+      {loading ? (
+        <ActivityIndicator color="#3B5BDB" style={{marginVertical: 24}} />
+      ) : doses.length === 0 ? (
+        <Text style={styles.emptyText}>
+          No active schedules from the PillSafe hub.
+        </Text>
+      ) : (
+        <>
+          {renderSection(
+            'MORNING',
+            '06:00 - 11:59',
+            <Sun size={20} color="#F59E0B" />,
+            morningMeds,
+            '#FEF9C3',
+          )}
+          {renderSection(
+            'AFTERNOON',
+            '12:00 - 16:59',
+            <Sun size={20} color="#D97706" />,
+            afternoonMeds,
+            '#FEF3C7',
+          )}
+          {renderSection(
+            'EVENING',
+            '17:00 - 23:59',
+            <Moon size={20} color="#6366F1" />,
+            eveningMeds,
+            '#EEF2FF',
+          )}
+
+          <View style={styles.streakCard}>
+            <View style={styles.streakLeft}>
+              <Text style={styles.streakTitle}>Today's adherence</Text>
+              <Text style={styles.streakSub}>
+                Based on live schedules and adherence logs from the hub.
               </Text>
             </View>
-            <View style={styles.slotBadge}>
-              <Text style={styles.slotBadgeText}>{med.slot}</Text>
+            <View style={styles.streakCircle}>
+              <Text style={styles.streakPercent}>{adherencePct}%</Text>
             </View>
-            <ChevronRight size={18} color="#9CA3AF" />
-          </TouchableOpacity>
-        ))}
-      </View>
+          </View>
+        </>
+      )}
 
-      {/* Streak Card */}
-      <View style={styles.streakCard}>
-        <View style={styles.streakLeft}>
-          <Text style={styles.streakTitle}>Perfect Streak!</Text>
-          <Text style={styles.streakSub}>
-            You've taken all your morning meds on time for 5 days.
-          </Text>
-        </View>
-        <View style={styles.streakCircle}>
-          <Text style={styles.streakPercent}>75%</Text>
-        </View>
-      </View>
-
-      <View style={{ height: 20 }} />
+      <View style={{height: 20}} />
     </ScrollView>
   );
 };
@@ -219,6 +290,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  errorText: {
+    color: '#991B1B',
+    marginBottom: 12,
+    fontSize: 13,
+  },
+  emptyText: {
+    color: '#6B7280',
+    fontSize: 14,
+  },
   periodSection: {
     marginBottom: 20,
   },
@@ -254,7 +334,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,

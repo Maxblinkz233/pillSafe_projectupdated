@@ -1,0 +1,24 @@
+Category,Component,Quantity,Notes,Config reference
+Controller,Raspberry Pi 4B,1,Main computer,main.py
+Storage,microSD card 16GB+,1,Raspberry Pi OS + project,
+Power,USB-C PSU 5V 3A (Pi),1,Powers Pi only,
+Vision,Pi Camera Module v2,1,CSI ribbon to Pi,core/camera.py
+Vision,CSI ribbon cable 15-pin,1,Usually bundled with camera,
+Dispensing,360° / continuous-rotation servo,6,One per compartment,servo.pins
+Dispensing,External 5V 3A+ PSU,1,Servo VCC only — share GND with Pi,servo.*
+Dispensing,Rotating cylinder (9 slots),6,Mechanical — per patient,
+Dispensing,Delivery tube + collection tray,1,Mechanical — gravity drop,
+Sensors,FC-51 IR obstacle sensor,2,Drop chute + pickup base,ir_sensors.*
+Feedback,Active buzzer module 3.3V,1,GPIO driven,buzzer.pin
+Timekeeping,DS3231 RTC module (I2C),1,Address 0x68,rtc.*
+Timekeeping,CR2032 coin cell,1,RTC backup battery,
+GSM,SIM800L module,1,SMS alerts,hardware/gsm.py
+GSM,USB-to-TTL serial adapter,1,3.3V logic preferred → /dev/ttyUSB0,alerts.serial_port
+GSM,3.7V LiPo battery 1000mAh+,1,Separate SIM800L power only,
+GSM,Nano SIM (active SMS),1,Mobile network,
+GSM,GSM antenna,1,Usually on SIM800L board,
+Voice (optional),INMP441 I2S microphone,1,Skip if voice.enabled: false,hardware.i2s_mic
+Wiring,Dupont jumper wires M-F,40+,Pi GPIO to modules,
+Wiring,Dupont jumper wires M-M,20+,Breadboard links,
+Wiring,Breadboard or perfboard,1-2,Prototyping,
+Wiring,GND bus / terminal block,1,Common ground for all supplies,

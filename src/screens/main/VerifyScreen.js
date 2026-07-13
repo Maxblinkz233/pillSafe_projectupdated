@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import {
   Bell,
@@ -17,48 +19,169 @@ import {
   ScanFace,
   Mic,
 } from 'lucide-react-native';
+import {useFocusEffect} from '@react-navigation/native';
+import {getApiConfig} from '../../services/config';
+import {
+  api,
+  buildTodayDoses,
+  greetingForNow,
+  initials,
+  nextPendingDose,
+  todayIsoDate,
+} from '../../services/api';
 
-const VerifyScreen = ({ navigation }) => {
+const VerifyScreen = ({navigation}) => {
   const [verifyState, setVerifyState] = useState('ready');
+  const [userName, setUserName] = useState('Patient');
+  const [userId, setUserId] = useState(null);
+  const [pendingDose, setPendingDose] = useState(null);
+  const [lastResult, setLastResult] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [loadingMeta, setLoadingMeta] = useState(true);
 
-  const startScan = () => {
+  const loadMeta = useCallback(async () => {
+    setLoadingMeta(true);
+    try {
+      const cfg = await getApiConfig();
+      setUserName(cfg.userName || 'Patient');
+      setUserId(cfg.userId);
+
+      if (!cfg.userId) {
+        setPendingDose(null);
+        setErrorMessage('Select a user in Settings → Device Connection.');
+        return;
+      }
+
+      const [schedules, logs] = await Promise.all([
+        api.getSchedules(cfg.userId),
+        api.getAdherence(cfg.userId, todayIsoDate()),
+      ]);
+      const doses = buildTodayDoses(schedules, logs);
+      setPendingDose(nextPendingDose(doses));
+      setErrorMessage('');
+    } catch (err) {
+      setErrorMessage(err.message || String(err));
+      setPendingDose(null);
+    } finally {
+      setLoadingMeta(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        if (!active) return;
+        await loadMeta();
+      })();
+      return () => {
+        active = false;
+      };
+    }, [loadMeta]),
+  );
+
+  const startScan = async () => {
+    if (!userId) {
+      Alert.alert(
+        'Not configured',
+        'Set API URL, token, and user ID under Settings → Device Connection.',
+      );
+      return;
+    }
+
     setVerifyState('scanning');
-    setTimeout(() => {
-      setTimeout(() => {
-        const success = Math.random() > 0.2;
-        setVerifyState(success ? 'success' : 'failed');
-      }, 3000);
-    }, 2000);
+    setErrorMessage('');
+    try {
+      await api.dispenseRequest({
+        userId,
+        scheduleId: pendingDose?.scheduleId,
+        authMode: 'face',
+      });
+      setLastResult({
+        mode: 'face',
+        medication: pendingDose?.name || 'Scheduled dose',
+        dosage: pendingDose?.dosage || '',
+      });
+      setVerifyState('success');
+      // Refresh pending dose after a short delay (Pi may still be dispensing)
+      setTimeout(loadMeta, 4000);
+    } catch (err) {
+      setErrorMessage(err.message || String(err));
+      setVerifyState('failed');
+    }
   };
 
-  const reset = () => setVerifyState('ready');
+  const reset = () => {
+    setVerifyState('ready');
+    setErrorMessage('');
+    loadMeta();
+  };
 
-  if (verifyState === 'ready') return <ReadyState onScan={startScan} navigation={navigation} />;
+  if (verifyState === 'ready') {
+    return (
+      <ReadyState
+        onScan={startScan}
+        navigation={navigation}
+        userName={userName}
+        pendingDose={pendingDose}
+        loading={loadingMeta}
+        errorMessage={errorMessage}
+      />
+    );
+  }
   if (verifyState === 'scanning') return <ScanningState />;
-  if (verifyState === 'success') return <SuccessState onDone={reset} />;
-  if (verifyState === 'failed') return <FailedState onRetry={startScan} onOverride={reset} />;
+  if (verifyState === 'success') {
+    return <SuccessState onDone={reset} userName={userName} result={lastResult} />;
+  }
+  return (
+    <FailedState
+      onRetry={startScan}
+      onOverride={reset}
+      message={errorMessage}
+    />
+  );
 };
 
-// Ready State
-const ReadyState = ({ onScan, navigation }) => (
+const ReadyState = ({
+  onScan,
+  navigation,
+  userName,
+  pendingDose,
+  loading,
+  errorMessage,
+}) => (
   <View style={styles.container}>
     <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
     <View style={styles.header}>
       <View style={styles.headerLeft}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>M</Text>
+          <Text style={styles.avatarText}>{initials(userName)}</Text>
         </View>
         <View>
-          <Text style={styles.greeting}>Good morning,</Text>
-          <Text style={styles.userName}>Maxwell</Text>
+          <Text style={styles.greeting}>{greetingForNow()}</Text>
+          <Text style={styles.userName}>{userName}</Text>
         </View>
       </View>
-      <Bell size={24} color="#374151" />
+      <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
+        <Bell size={24} color="#374151" />
+      </TouchableOpacity>
     </View>
 
     <View style={styles.readyContent}>
       <Text style={styles.readyTitle}>Ready to Dispense?</Text>
-      <Text style={styles.readySub}>Morning dosage: 2 pills remaining</Text>
+      {loading ? (
+        <ActivityIndicator color="#3B5BDB" style={{marginBottom: 24}} />
+      ) : (
+        <Text style={styles.readySub}>
+          {pendingDose
+            ? `${pendingDose.name}${pendingDose.dosage ? ` (${pendingDose.dosage})` : ''} at ${pendingDose.time}`
+            : 'No pending dose found for today — you can still send Verify Now if the Pi is waiting.'}
+        </Text>
+      )}
+
+      {!!errorMessage && (
+        <Text style={styles.errorHint}>{errorMessage}</Text>
+      )}
 
       <View style={styles.faceFrame}>
         <View style={styles.faceFrameCornerTL} />
@@ -72,12 +195,18 @@ const ReadyState = ({ onScan, navigation }) => (
 
       <TouchableOpacity style={styles.scanButton} onPress={onScan}>
         <Camera size={20} color="#FFFFFF" />
-        <Text style={styles.scanButtonText}>Scan My Face</Text>
+        <Text style={styles.scanButtonText}>Verify Now (Face)</Text>
       </TouchableOpacity>
-      <Text style={styles.scanHint}>Look directly into the dispenser camera</Text>
+      <Text style={styles.scanHint}>
+        Sends POST /dispense/request — look at the Pi camera
+      </Text>
       <TouchableOpacity
         style={styles.voiceButton}
-        onPress={() => navigation.navigate('VoiceVerify')}>
+        onPress={() =>
+          navigation.navigate('VoiceVerify', {
+            scheduleId: pendingDose?.scheduleId,
+          })
+        }>
         <Mic size={20} color="#3B5BDB" />
         <Text style={styles.voiceButtonText}>Use Voice Instead</Text>
       </TouchableOpacity>
@@ -85,12 +214,11 @@ const ReadyState = ({ onScan, navigation }) => (
   </View>
 );
 
-// Scanning State
 const ScanningState = () => (
   <ScrollView style={styles.container}>
     <View style={styles.scanningHeader}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>M</Text>
+        <Text style={styles.avatarText}>P</Text>
       </View>
       <Text style={styles.pillSafeLogo}>PillSafe</Text>
     </View>
@@ -98,13 +226,13 @@ const ScanningState = () => (
     <Text style={styles.scanningTitle}>Verify & Dispense</Text>
     <Text style={styles.scanningSubtitle}>
       Verification is performed by the Pi camera.{'\n'}
-      Your app is sending the request{'\n'}to start the Pi capture.
+      Your app sent Verify Now to start capture.
     </Text>
 
     <View style={styles.scanCircleOuter}>
       <View style={styles.scanCircleMiddle}>
         <View style={styles.scanCircleInner}>
-          <ScanFace size={50} color="#A5B4FC" />
+          <ActivityIndicator size="large" color="#3B5BDB" />
         </View>
       </View>
     </View>
@@ -112,47 +240,46 @@ const ScanningState = () => (
     <View style={styles.stepsList}>
       <StepItem
         icon={<CheckCircle size={22} color="#10B981" />}
-        title="Scanning face"
-        subtitle="Biometric data captured successfully"
+        title="Request accepted"
+        subtitle="POST /dispense/request acknowledged"
         status="done"
       />
       <View style={styles.stepDivider} />
       <StepItem
         icon={<RefreshCw size={22} color="#3B5BDB" />}
         title="Matching embeddings"
-        subtitle="Verifying profile against database..."
+        subtitle="Pi FaceNet verifying scheduled patient..."
         status="active"
       />
       <View style={styles.stepDivider} />
       <StepItem
         icon={<CheckCircle size={22} color="#D1D5DB" />}
         title="Rotating carousel"
-        subtitle="Aligning medication cartridge"
+        subtitle="Aligning medication slot"
         status="pending"
       />
       <View style={styles.stepDivider} />
       <StepItem
         icon={<CheckCircle size={22} color="#D1D5DB" />}
         title="Waiting for pickup"
-        subtitle="Open the dispense tray when ready"
+        subtitle="Collect from the delivery tray"
         status="pending"
       />
     </View>
-    <View style={{ height: 40 }} />
+    <View style={{height: 40}} />
   </ScrollView>
 );
 
-// Success State
-const SuccessState = ({ onDone }) => (
+const SuccessState = ({onDone, userName, result}) => (
   <ScrollView style={styles.container}>
     <View style={styles.successHeader}>
       <View style={styles.headerLeft}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>M</Text>
+          <Text style={styles.avatarText}>{initials(userName)}</Text>
         </View>
         <View>
-          <Text style={styles.greeting}>Good morning,</Text>
-          <Text style={styles.userName}>Maxwell</Text>
+          <Text style={styles.greeting}>{greetingForNow()}</Text>
+          <Text style={styles.userName}>{userName}</Text>
         </View>
       </View>
       <View style={styles.logoBadge}>
@@ -164,30 +291,26 @@ const SuccessState = ({ onDone }) => (
       <View style={styles.successCircle}>
         <CheckCircle size={50} color="#FFFFFF" />
       </View>
-      <Text style={styles.successTitle}>Identity Confirmed</Text>
-      <Text style={styles.successSub}>Welcome, Maxwell.</Text>
-      <View style={styles.confidenceScore}>
-        <Text style={styles.confidenceLabel}>CONFIDENCE SCORE </Text>
-        <Text style={styles.confidenceValue}>distance: 0.21</Text>
-      </View>
+      <Text style={styles.successTitle}>Verify Now Sent</Text>
+      <Text style={styles.successSub}>
+        Welcome, {userName}. The hub is authenticating and dispensing.
+      </Text>
     </View>
 
     <View style={styles.verificationLogs}>
       <Text style={styles.logsTitle}>VERIFICATION LOGS</Text>
-      <LogItem label="Scanning face" status="SUCCESS" />
-      <LogItem label="Matching embeddings" status="SUCCESS" />
-      <LogItem label="Rotating carousel" status="ENGAGED" />
-      <View style={styles.pickupRow}>
-        <CheckCircle size={18} color="#3B5BDB" />
-        <Text style={styles.pickupText}>Ready for pickup</Text>
-        <View style={styles.pickupDot} />
-      </View>
+      <LogItem label="API request" status="ACCEPTED" />
+      <LogItem label="Auth mode" status={(result?.mode || 'face').toUpperCase()} />
+      <LogItem label="Pi pipeline" status="RUNNING" />
     </View>
 
     <View style={styles.currentBatch}>
       <View style={styles.currentBatchLeft}>
         <Text style={styles.currentBatchLabel}>CURRENT BATCH</Text>
-        <Text style={styles.currentBatchMed}>Atorvastatin 20mg</Text>
+        <Text style={styles.currentBatchMed}>
+          {result?.medication || 'Scheduled medication'}
+          {result?.dosage ? ` ${result.dosage}` : ''}
+        </Text>
       </View>
       <CheckCircle size={24} color="#3B5BDB" />
     </View>
@@ -198,16 +321,15 @@ const SuccessState = ({ onDone }) => (
     <TouchableOpacity style={styles.verifyAnotherButton} onPress={onDone}>
       <Text style={styles.verifyAnotherText}>Verify another</Text>
     </TouchableOpacity>
-    <View style={{ height: 40 }} />
+    <View style={{height: 40}} />
   </ScrollView>
 );
 
-// Failed State
-const FailedState = ({ onRetry, onOverride }) => (
+const FailedState = ({onRetry, onOverride, message}) => (
   <ScrollView style={styles.container}>
     <View style={styles.failedHeader}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>JD</Text>
+        <Text style={styles.avatarText}>!</Text>
       </View>
       <Text style={styles.failedHeaderTitle}>Verify & Dispense</Text>
       <View style={styles.circle} />
@@ -217,23 +339,10 @@ const FailedState = ({ onRetry, onOverride }) => (
       <View style={styles.failedCircle}>
         <XCircle size={50} color="#991B1B" />
       </View>
-      <Text style={styles.failedTitle}>Verification Failed</Text>
-      <Text style={styles.failedSub}>Face not recognized. Caregiver notified.</Text>
-    </View>
-
-    <View style={styles.analysisSummary}>
-      <Text style={styles.analysisTitle}>ANALYSIS SUMMARY</Text>
-      <View style={styles.analysisItem}>
-        <CheckCircle size={18} color="#10B981" />
-        <Text style={styles.analysisLabel}>Scanning face</Text>
-        <CheckCircle size={18} color="#10B981" />
-      </View>
-      <View style={styles.analysisDivider} />
-      <View style={styles.analysisItem}>
-        <XCircle size={18} color="#EF4444" />
-        <Text style={styles.analysisLabel}>Matching embeddings</Text>
-        <XCircle size={18} color="#EF4444" />
-      </View>
+      <Text style={styles.failedTitle}>Request Failed</Text>
+      <Text style={styles.failedSub}>
+        {message || 'Could not reach the PillSafe hub.'}
+      </Text>
     </View>
 
     <TouchableOpacity style={styles.retryButton} onPress={onRetry}>
@@ -242,37 +351,39 @@ const FailedState = ({ onRetry, onOverride }) => (
     </TouchableOpacity>
     <TouchableOpacity style={styles.overrideButton} onPress={onOverride}>
       <Key size={18} color="#3B5BDB" />
-      <Text style={styles.overrideButtonText}>Manual Override (Caregiver)</Text>
+      <Text style={styles.overrideButtonText}>Back to Ready</Text>
     </TouchableOpacity>
     <Text style={styles.failedHint}>
-      Having trouble? Ensure your face is well-lit and clearly visible.
+      Check Device Connection settings, Wi-Fi (PillSafe-AP), and that main.py is running.
     </Text>
-    <View style={{ height: 40 }} />
+    <View style={{height: 40}} />
   </ScrollView>
 );
 
-const StepItem = ({ icon, title, subtitle, status }) => (
+const StepItem = ({icon, title, subtitle, status}) => (
   <View style={styles.stepItem}>
     {icon}
     <View style={styles.stepInfo}>
-      <Text style={[
-        styles.stepTitle,
-        status === 'active' && { color: '#3B5BDB' },
-        status === 'pending' && { color: '#9CA3AF' },
-      ]}>
+      <Text
+        style={[
+          styles.stepTitle,
+          status === 'active' && {color: '#3B5BDB'},
+          status === 'pending' && {color: '#9CA3AF'},
+        ]}>
         {title}
       </Text>
-      <Text style={[
-        styles.stepSubtitle,
-        status === 'pending' && { color: '#D1D5DB' },
-      ]}>
+      <Text
+        style={[
+          styles.stepSubtitle,
+          status === 'pending' && {color: '#D1D5DB'},
+        ]}>
         {subtitle}
       </Text>
     </View>
   </View>
 );
 
-const LogItem = ({ label, status }) => (
+const LogItem = ({label, status}) => (
   <View style={styles.logItem}>
     <CheckCircle size={16} color="#10B981" />
     <Text style={styles.logLabel}>{label}</Text>
@@ -333,7 +444,16 @@ const styles = StyleSheet.create({
   readySub: {
     fontSize: 14,
     color: '#6B7280',
-    marginBottom: 40,
+    marginBottom: 24,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
+  errorHint: {
+    fontSize: 13,
+    color: '#991B1B',
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 12,
   },
   faceFrame: {
     width: 220,
@@ -397,7 +517,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#3B5BDB',
     borderRadius: 12,
     paddingVertical: 16,
-    paddingHorizontal: 60,
+    paddingHorizontal: 48,
     marginBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -553,22 +673,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     marginBottom: 12,
-  },
-  confidenceScore: {
-    flexDirection: 'row',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 20,
+    textAlign: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  confidenceLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  confidenceValue: {
-    fontSize: 12,
-    color: '#10B981',
-    fontWeight: 'bold',
   },
   verificationLogs: {
     backgroundColor: '#FFFFFF',
@@ -600,24 +706,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     fontWeight: '500',
-  },
-  pickupRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 10,
-    gap: 12,
-  },
-  pickupText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  pickupDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#3B5BDB',
   },
   currentBatch: {
     backgroundColor: '#FFFFFF',
@@ -710,34 +798,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
-  },
-  analysisSummary: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  analysisTitle: {
-    fontSize: 11,
-    color: '#6B7280',
-    fontWeight: '600',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  analysisItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-  },
-  analysisDivider: {
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-  analysisLabel: {
-    flex: 1,
-    fontSize: 14,
-    color: '#374151',
+    paddingHorizontal: 12,
   },
   retryButton: {
     backgroundColor: '#3B5BDB',

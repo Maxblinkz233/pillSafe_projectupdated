@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StatusBar,
   Animated,
   ScrollView,
+  Alert,
 } from 'react-native';
 import {
   Mic,
@@ -17,19 +18,47 @@ import {
   Key,
   ChevronLeft,
 } from 'lucide-react-native';
+import {getApiConfig} from '../../services/config';
+import {api, greetingForNow, initials} from '../../services/api';
 
-const PASSPHRASE = 'PillSafe authorize';
+const FALLBACK_PASSPHRASE = 'PillSafe authorize';
 
-const VoiceVerifyScreen = ({ navigation }) => {
+const VoiceVerifyScreen = ({navigation, route}) => {
+  const scheduleId = route?.params?.scheduleId;
   const [voiceState, setVoiceState] = useState('idle');
   // States: idle, listening, processing, success, failed
   const [transcript, setTranscript] = useState('');
   const [countdown, setCountdown] = useState(3);
+  const [passphrase, setPassphrase] = useState(FALLBACK_PASSPHRASE);
+  const [userName, setUserName] = useState('Patient');
+  const [userId, setUserId] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Animated values for waveform bars
   const bars = useRef(
-    Array.from({ length: 7 }, () => new Animated.Value(0.3))
+    Array.from({length: 7}, () => new Animated.Value(0.3)),
   ).current;
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const cfg = await getApiConfig();
+      if (!active) return;
+      setUserName(cfg.userName || 'Patient');
+      setUserId(cfg.userId);
+      try {
+        const challenge = await api.getVoiceChallenge();
+        if (challenge?.prompt) {
+          setPassphrase(challenge.prompt);
+        }
+      } catch {
+        // Keep fallback passphrase if hub unreachable
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const animateWave = () => {
     const animations = bars.map(bar =>
@@ -45,8 +74,8 @@ const VoiceVerifyScreen = ({ navigation }) => {
             duration: Math.random() * 300 + 200,
             useNativeDriver: true,
           }),
-        ])
-      )
+        ]),
+      ),
     );
     animations.forEach(a => a.start());
     return animations;
@@ -63,33 +92,44 @@ const VoiceVerifyScreen = ({ navigation }) => {
     });
   };
 
-  const startListening = () => {
+  const startListening = useCallback(async () => {
+    if (!userId) {
+      Alert.alert(
+        'Not configured',
+        'Set API URL, token, and user ID under Settings → Device Connection.',
+      );
+      return;
+    }
+
     setVoiceState('listening');
     setTranscript('');
-    const animations = animateWave();
+    setErrorMessage('');
+    animateWave();
 
-    // Simulate listening for 3 seconds
-    setTimeout(() => {
+    // Brief UI cue — actual voice capture happens on the Pi mic
+    setTimeout(async () => {
       stopWave();
       setVoiceState('processing');
-
-      // Simulate transcript appearing
-      setTimeout(() => {
-        const success = Math.random() > 0.2;
-        if (success) {
-          setTranscript(PASSPHRASE);
-          setTimeout(() => setVoiceState('success'), 1000);
-        } else {
-          setTranscript('PillSafe author...');
-          setTimeout(() => setVoiceState('failed'), 1000);
-        }
-      }, 1500);
-    }, 3000);
-  };
+      try {
+        await api.dispenseRequest({
+          userId,
+          scheduleId,
+          authMode: 'voice',
+        });
+        setTranscript(passphrase);
+        setVoiceState('success');
+      } catch (err) {
+        setTranscript('');
+        setErrorMessage(err.message || String(err));
+        setVoiceState('failed');
+      }
+    }, 1500);
+  }, [userId, scheduleId, passphrase]);
 
   const reset = () => {
     setVoiceState('idle');
     setTranscript('');
+    setErrorMessage('');
     stopWave();
   };
 
@@ -106,11 +146,11 @@ const VoiceVerifyScreen = ({ navigation }) => {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>M</Text>
+            <Text style={styles.avatarText}>{initials(userName)}</Text>
           </View>
           <View>
-            <Text style={styles.greeting}>Good morning,</Text>
-            <Text style={styles.userName}>Maxwell</Text>
+            <Text style={styles.greeting}>{greetingForNow()}</Text>
+            <Text style={styles.userName}>{userName}</Text>
           </View>
         </View>
         <View style={styles.logoBadge}>
@@ -121,13 +161,14 @@ const VoiceVerifyScreen = ({ navigation }) => {
 
       <Text style={styles.title}>Voice Verification</Text>
       <Text style={styles.subtitle}>
-        Say the passphrase clearly into your microphone to verify your identity.
+        Speak clearly into the PillSafe hub microphone. The app sends Verify Now
+        (voice) to the Pi.
       </Text>
 
       {/* Passphrase Card */}
       <View style={styles.passphraseCard}>
         <Text style={styles.passphraseLabel}>YOUR PASSPHRASE</Text>
-        <Text style={styles.passphrase}>"{PASSPHRASE}"</Text>
+        <Text style={styles.passphrase}>"{passphrase}"</Text>
       </View>
 
       {/* Voice Visualizer */}
@@ -220,7 +261,7 @@ const VoiceVerifyScreen = ({ navigation }) => {
           <View style={styles.failedCardText}>
             <Text style={styles.failedCardTitle}>Verification Failed</Text>
             <Text style={styles.failedCardSub}>
-              Voice not recognized. Please try again.
+              {errorMessage || 'Voice request failed. Check hub connection and try again.'}
             </Text>
           </View>
         </View>
