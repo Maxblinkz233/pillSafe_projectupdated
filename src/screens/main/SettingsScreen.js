@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   View,
   Text,
@@ -23,8 +23,30 @@ import {
   LogOut,
   ChevronRight,
 } from 'lucide-react-native';
+import {useFocusEffect} from '@react-navigation/native';
+import {getApiConfig} from '../../services/config';
+import {initials} from '../../services/api';
 
 const SettingsScreen = ({ navigation }) => {
+  const [userName, setUserName] = useState('Patient');
+  const [avatarLetter, setAvatarLetter] = useState('P');
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const cfg = await getApiConfig();
+        if (!active) return;
+        const name = cfg.userName || 'Patient';
+        setUserName(name);
+        setAvatarLetter(initials(name));
+      })();
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
   const handleLogout = () => navigation.replace('Login');
 
   const SettingsItem = ({ icon, label, onPress }) => (
@@ -45,11 +67,11 @@ const SettingsScreen = ({ navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>M</Text>
+            <Text style={styles.avatarText}>{avatarLetter}</Text>
           </View>
           <View>
             <Text style={styles.patientLabel}>PATIENT</Text>
-            <Text style={styles.userName}>Maxwell</Text>
+            <Text style={styles.userName}>{userName}</Text>
           </View>
         </View>
         <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
@@ -60,10 +82,10 @@ const SettingsScreen = ({ navigation }) => {
       {/* Profile Card */}
       <View style={styles.profileCard}>
         <View style={styles.profileAvatar}>
-          <Text style={styles.profileAvatarText}>M</Text>
+          <Text style={styles.profileAvatarText}>{avatarLetter}</Text>
         </View>
         <View style={styles.profileInfo}>
-          <Text style={styles.profileName}>Maxwell</Text>
+          <Text style={styles.profileName}>{userName}</Text>
           <TouchableOpacity style={styles.viewProfileRow}>
             <Text style={styles.viewProfileText}>View Profile</Text>
             <ChevronRight size={14} color="#3B5BDB" />
@@ -121,6 +143,12 @@ const SettingsScreen = ({ navigation }) => {
           icon={<Scan size={20} color="#3B5BDB" />}
           label="Face Verification"
           onPress={() => navigation.navigate('FaceEnroll')}
+        />
+        <View style={styles.divider} />
+        <SettingsItem
+          icon={<Wifi size={20} color="#3B5BDB" />}
+          label="Device Connection"
+          onPress={() => navigation.navigate('DeviceConnection')}
         />
         <View style={styles.divider} />
         <SettingsItem

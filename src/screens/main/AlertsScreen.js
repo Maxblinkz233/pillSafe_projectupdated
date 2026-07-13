@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Bell,
@@ -15,48 +17,123 @@ import {
   Battery,
   ChevronLeft,
 } from 'lucide-react-native';
-import { alerts } from '../../data/mockData';
+import {useFocusEffect} from '@react-navigation/native';
+import {getApiConfig} from '../../services/config';
+import {
+  api,
+  formatRelativeTime,
+  initials,
+  notificationTypeLabel,
+} from '../../services/api';
 
-const AlertsScreen = ({ navigation }) => {
+const AlertsScreen = ({navigation}) => {
   const [activeFilter, setActiveFilter] = useState('All');
+  const [userName, setUserName] = useState('Patient');
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
   const filters = ['All', 'Dispensed', 'Missed', 'Verification'];
+
+  const load = useCallback(async () => {
+    try {
+      const cfg = await getApiConfig();
+      setUserName(cfg.userName || 'Patient');
+      const rows = await api.getNotifications(cfg.userId);
+      const mapped = (rows || []).map(n => ({
+        id: String(n.notification_id),
+        notificationId: n.notification_id,
+        apiType: n.type,
+        type: notificationTypeLabel(n.type),
+        title: n.type,
+        message: n.message,
+        time: formatRelativeTime(n.created_at),
+        isNew: !n.is_read,
+      }));
+      setAlerts(mapped);
+      setError('');
+    } catch (err) {
+      setError(err.message || String(err));
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      load();
+    }, [load]),
+  );
 
   const getAlertColor = type => {
     if (type === 'MISSED DOSE') return '#EF4444';
     if (type === 'DOSE DISPENSED') return '#10B981';
+    if (type === 'VERIFICATION FAILED') return '#EF4444';
     if (type === 'IDENTITY VERIFIED') return '#3B5BDB';
+    if (type === 'REMINDER') return '#3B5BDB';
+    if (type === 'LOW INVENTORY') return '#F59E0B';
     if (type === 'DEVICE ALERT') return '#F59E0B';
     return '#6B7280';
   };
 
   const getAlertIcon = type => {
-    if (type === 'MISSED DOSE')
-      return <AlertTriangle size={16} color={getAlertColor(type)} />;
-    if (type === 'DOSE DISPENSED')
-      return <CheckCircle size={16} color={getAlertColor(type)} />;
-    if (type === 'IDENTITY VERIFIED')
-      return <Shield size={16} color={getAlertColor(type)} />;
-    if (type === 'DEVICE ALERT')
-      return <Battery size={16} color={getAlertColor(type)} />;
-    return <Bell size={16} color={getAlertColor(type)} />;
+    const color = getAlertColor(type);
+    if (type === 'MISSED DOSE' || type === 'VERIFICATION FAILED') {
+      return <AlertTriangle size={16} color={color} />;
+    }
+    if (type === 'DOSE DISPENSED') {
+      return <CheckCircle size={16} color={color} />;
+    }
+    if (type === 'REMINDER' || type === 'IDENTITY VERIFIED') {
+      return <Shield size={16} color={color} />;
+    }
+    if (type === 'DEVICE ALERT' || type === 'LOW INVENTORY') {
+      return <Battery size={16} color={color} />;
+    }
+    return <Bell size={16} color={color} />;
   };
 
   const filteredAlerts =
     activeFilter === 'All'
       ? alerts
       : alerts.filter(a => {
-          if (activeFilter === 'Missed') return a.type === 'MISSED DOSE';
-          if (activeFilter === 'Dispensed') return a.type === 'DOSE DISPENSED';
-          if (activeFilter === 'Verification')
-            return a.type === 'IDENTITY VERIFIED';
+          if (activeFilter === 'Missed') {
+            return a.apiType === 'MISSED' || a.apiType === 'REJECTED';
+          }
+          if (activeFilter === 'Dispensed') return a.apiType === 'DISPENSED';
+          if (activeFilter === 'Verification') {
+            return a.apiType === 'REJECTED' || a.apiType === 'REMINDER';
+          }
           return true;
         });
+
+  const markAllRead = async () => {
+    const unread = alerts.filter(a => a.isNew);
+    await Promise.all(
+      unread.map(a =>
+        api.markNotificationRead(a.notificationId).catch(() => null),
+      ),
+    );
+    load();
+  };
+
+  const markOneRead = async alert => {
+    if (!alert.isNew) return;
+    try {
+      await api.markNotificationRead(alert.notificationId);
+      load();
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity
@@ -66,25 +143,34 @@ const AlertsScreen = ({ navigation }) => {
           </TouchableOpacity>
           <View style={styles.headerUser}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>M</Text>
+              <Text style={styles.avatarText}>{initials(userName)}</Text>
             </View>
             <View>
               <Text style={styles.patientLabel}>Patient</Text>
-              <Text style={styles.userName}>Maxwell</Text>
+              <Text style={styles.userName}>{userName}</Text>
             </View>
           </View>
         </View>
         <View style={styles.bellContainer}>
           <Bell size={24} color="#374151" />
-          <View style={styles.bellBadge} />
+          {alerts.some(a => a.isNew) && <View style={styles.bellBadge} />}
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Title */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load();
+            }}
+          />
+        }>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Alerts & Notifications</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={markAllRead}>
             <Text style={styles.markAllRead}>Mark all read</Text>
           </TouchableOpacity>
         </View>
@@ -95,7 +181,8 @@ const AlertsScreen = ({ navigation }) => {
           </Text>
         </View>
 
-        {/* Filters */}
+        {!!error && <Text style={styles.errorText}>{error}</Text>}
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -119,51 +206,56 @@ const AlertsScreen = ({ navigation }) => {
           ))}
         </ScrollView>
 
-        {/* Alert Cards */}
-        {filteredAlerts.map(alert => (
-          <View
-            key={alert.id}
-            style={[
-              styles.alertCard,
-              { borderLeftColor: getAlertColor(alert.type) },
-            ]}>
-            <View style={styles.alertTop}>
-              <View style={styles.alertTypeRow}>
-                {getAlertIcon(alert.type)}
-                <Text
-                  style={[
-                    styles.alertType,
-                    { color: getAlertColor(alert.type) },
-                  ]}>
-                  {alert.type}
-                </Text>
+        {loading ? (
+          <ActivityIndicator color="#3B5BDB" style={{marginVertical: 24}} />
+        ) : filteredAlerts.length === 0 ? (
+          <Text style={styles.emptyText}>No notifications from the hub yet.</Text>
+        ) : (
+          filteredAlerts.map(alert => (
+            <TouchableOpacity
+              key={alert.id}
+              style={[
+                styles.alertCard,
+                {borderLeftColor: getAlertColor(alert.type)},
+              ]}
+              onPress={() => markOneRead(alert)}>
+              <View style={styles.alertTop}>
+                <View style={styles.alertTypeRow}>
+                  {getAlertIcon(alert.type)}
+                  <Text
+                    style={[
+                      styles.alertType,
+                      {color: getAlertColor(alert.type)},
+                    ]}>
+                    {alert.type}
+                  </Text>
+                </View>
+                {alert.isNew && (
+                  <View style={styles.newBadge}>
+                    <Text style={styles.newBadgeText}>New</Text>
+                  </View>
+                )}
               </View>
-              {alert.isNew && (
-                <View style={styles.newBadge}>
-                  <Text style={styles.newBadgeText}>New</Text>
+
+              <Text style={styles.alertTitle}>{alert.title}</Text>
+              <Text style={styles.alertMessage}>{alert.message}</Text>
+
+              {alert.apiType === 'MISSED' && (
+                <View style={styles.alertActions}>
+                  <TouchableOpacity
+                    style={styles.markTakenButton}
+                    onPress={() => navigation.navigate('Verify')}>
+                    <Text style={styles.markTakenText}>Verify Now</Text>
+                  </TouchableOpacity>
                 </View>
               )}
-            </View>
 
-            <Text style={styles.alertTitle}>{alert.title}</Text>
-            <Text style={styles.alertMessage}>{alert.message}</Text>
+              <Text style={styles.alertTime}>{alert.time}</Text>
+            </TouchableOpacity>
+          ))
+        )}
 
-            {alert.type === 'MISSED DOSE' && (
-              <View style={styles.alertActions}>
-                <TouchableOpacity style={styles.markTakenButton}>
-                  <Text style={styles.markTakenText}>Mark as Taken</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.snoozeButton}>
-                  <Text style={styles.snoozeText}>Snooze</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            <Text style={styles.alertTime}>{alert.time}</Text>
-          </View>
-        ))}
-
-        <View style={{ height: 30 }} />
+        <View style={{height: 30}} />
       </ScrollView>
     </View>
   );
@@ -195,7 +287,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -271,6 +363,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
   },
+  errorText: {
+    color: '#991B1B',
+    marginBottom: 12,
+    fontSize: 13,
+  },
+  emptyText: {
+    color: '#6B7280',
+    fontSize: 14,
+    marginTop: 8,
+  },
   filtersContainer: {
     marginBottom: 16,
   },
@@ -302,7 +404,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderLeftWidth: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -359,18 +461,6 @@ const styles = StyleSheet.create({
   },
   markTakenText: {
     color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  snoozeButton: {
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  snoozeText: {
-    color: '#374151',
     fontSize: 13,
     fontWeight: '600',
   },

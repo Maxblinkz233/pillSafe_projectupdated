@@ -1,0 +1,132 @@
+# ============================================================
+# PillSafe — Central Configuration File
+# All tuneable system parameters in one place (NFR-21)
+# ============================================================
+
+# --- Facial Recognition (MobileFaceNet TFLite) ---
+face:
+  confidence_threshold: 60          # Minimum confidence (0–100) to accept a match
+  distance_threshold: 0.6           # Max cosine distance for a valid match
+  max_retries: 8
+  sample_count: 50
+  image_size: [112, 112]            # MobileFaceNet input size (H, W)
+  cascade_path: "haarcascade_frontalface_default.xml"
+  scale_factor: 1.1        # Smaller = more thorough scan (slower)
+  min_neighbors: 3         # Lower = more detections, more false positives
+  min_face_size: [50, 50]  # Minimum face size in pixels (W, H)
+  dataset_path: "data/dataset"
+  model_path: "data/models/mobilefacenet.tflite"
+
+# --- Scheduling & Dispensing ---
+schedule:
+  grace_period_minutes: 15
+  poll_interval_seconds: 60
+
+# --- Dispensing handshake ---
+# When require_verify_request is true the device waits for the mobile app's
+# "Verify Now" (POST /dispense/request) before authenticating; set false for
+# fully autonomous timer-driven verification at the scheduled time.
+dispense:
+  require_verify_request: true
+  verify_request_poll_seconds: 2
+
+# --- Servo Motors (one rotating cylinder per compartment) ---
+# Dispensing is rotation-only: each compartment's servo rotates the chosen
+# slot over its drop hole and the pill falls by gravity to the base.
+# There is no gate servo.
+servo:
+  frequency_hz: 50
+  num_compartments: 6
+  num_slots: 9                       # angular slots per compartment (~40° each)
+  # One signal pin per compartment (BCM numbering). Index = compartment.
+  # Avoids pins used by I2C RTC (2,3), IR sensors (23,24), buzzer (25),
+  # and the I2S mic (18,19,20).
+  pins: [12, 13, 16, 17, 26, 27]
+  max_angle: 360                     # full rotation: 9 slots × 40°
+  min_duty: 2.5                      # duty cycle at 0°
+  max_duty: 12.5                     # duty cycle at max_angle
+  hold_time: 0.5                     # seconds to hold before releasing the signal
+
+# --- IR Sensors ---
+ir_sensors:
+  pill_detect_pin: 23
+  pill_pickup_pin: 24
+  debounce_ms: 200
+
+# --- Buzzer ---
+buzzer:
+  pin: 25
+  dose_ready_pattern: [0.2, 0.1, 0.2, 0.1, 0.2]
+  success_pattern: [0.5]
+  failure_pattern: [0.1, 0.1, 0.1, 0.1, 0.1]
+  missed_pattern: [1.0, 0.5, 1.0]
+
+# --- GSM / SMS Alerts ---
+alerts:
+  serial_port: "/dev/ttyUSB0"
+  baud_rate: 9600
+  max_sms_per_event: 2
+  retry_interval_minutes: 60
+  sms_timeout: 10
+
+# --- Flask REST API ---
+api:
+  host: "0.0.0.0"
+  port: 5000
+  token: "CHANGE_ME_ON_FIRST_SETUP"
+
+# --- Database ---
+database:
+  path: "data/pillsafe.db"
+
+# --- DS3231 RTC ---
+rtc:
+  i2c_bus: 1
+  i2c_address: 0x68
+
+# --- System ---
+system:
+  max_users: 6
+  log_file: "data/pillsafe.log"
+  log_level: "INFO"
+
+# --- Wi-Fi Access Point (Hotspot) ---
+# The Pi broadcasts its own network so the caregiver's phone
+# can connect directly without needing an external Wi-Fi router.
+hotspot:
+  enabled: true
+  ssid: "PillSafe-AP"
+  password: "pillsafe2026"          # WPA2 passphrase (min 8 chars)
+  channel: 6
+  ip_address: "192.168.4.1"
+  subnet: "255.255.255.0"
+  dhcp_range_start: "192.168.4.10"
+  dhcp_range_end: "192.168.4.50"
+  dhcp_lease_time: "24h"
+
+# ── Voice Recognition (additions to config.yaml) ──────────────────────────
+voice:
+  enabled: true                   # set false to disable voice auth entirely
+  sample_rate: 16000              # Hz — INMP441 native sample rate
+  record_duration_sec: 3          # seconds recorded per utterance
+  n_mfcc: 40                      # MFCC coefficient count
+  enrol_samples: 3                # utterances captured during enrolment
+  similarity_threshold: 0.82      # cosine similarity floor for ACCEPT
+  min_rms: 0.015                  # reject recordings quieter than this (blocks silence false-accepts)
+  device_index: null              # null = OS default input; set int for specific device
+  models_dir: "models/voice"      # where .npy templates are stored
+
+# ── Hardware additions ─────────────────────────────────────────────────────
+hardware:
+  i2s_mic:
+    enabled: true
+    # INMP441 wiring (BCM numbering):
+    #   SCK  → GPIO 18   (I2S bit clock)
+    #   WS   → GPIO 19   (I2S word select / LRCLK)
+    #   SD   → GPIO 20   (I2S data in)
+    #   VDD  → 3.3V
+    #   GND  → GND
+    #   L/R  → GND       (select left channel)
+    bclk_pin: 18
+    lrclk_pin: 19
+    data_pin: 20

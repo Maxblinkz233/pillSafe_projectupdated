@@ -6,6 +6,7 @@ import { View } from 'react-native';
 import { Home, Calendar, ScanFace, BarChart2, Settings } from 'lucide-react-native';
 import VoiceVerifyScreen from '../screens/main/VoiceVerifyScreen';
 import SettingsDetailScreen from '../screens/main/SettingsDetailScreen';
+import DeviceConnectionScreen from '../screens/main/DeviceConnectionScreen';
 
 // Auth Screens
 import SplashScreen from '../screens/auth/SplashScreen';
@@ -104,6 +105,7 @@ const AppNavigator = () => {
         <Stack.Screen name="Alerts" component={AlertsScreen} />
         <Stack.Screen name="VoiceVerify" component={VoiceVerifyScreen} />
         <Stack.Screen name="SettingsDetail" component={SettingsDetailScreen} />
+        <Stack.Screen name="DeviceConnection" component={DeviceConnectionScreen} />
         <Stack.Screen name="AddMedication" component={AddMedicationScreen} />
         <Stack.Screen name="VoiceEnroll" component={VoiceEnrollScreen} />
       </Stack.Navigator>
