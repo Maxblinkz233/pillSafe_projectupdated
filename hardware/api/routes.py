@@ -11,13 +11,23 @@ from flask import Flask, request, jsonify
 
 from database.db_manager import DatabaseManager
 from enrollment.enrol_user import EnrolmentManager
-from core import voice_recogniser as vr
 from utils.config import get_config
 from utils.logger import setup_logger
 
 logger = setup_logger("pillsafe.api")
 
+try:
+    from core import voice_recogniser as vr
+except Exception:  # pragma: no cover - optional when sounddevice/librosa missing
+    vr = None
+
 DEFAULT_TOKEN = "CHANGE_ME_ON_FIRST_SETUP"
+
+
+def _voice_enabled() -> bool:
+    cfg = get_config()
+    voice_cfg = getattr(cfg, "voice", None)
+    return bool(voice_cfg and getattr(voice_cfg, "enabled", False) and vr is not None)
 
 
 def create_app(db: DatabaseManager,
@@ -135,18 +145,24 @@ def create_app(db: DatabaseManager,
     @app.route("/voice/challenge", methods=["GET"])
     @require_auth
     def get_voice_challenge():
+        if not _voice_enabled():
+            return jsonify({"status": "error", "error": "Voice auth disabled"}), 503
         prompt = vr.get_random_challenge()
         return jsonify({"status": "success", "data": {"prompt": prompt}}), 200
 
     @app.route("/users/<int:user_id>/enrol/voice", methods=["POST"])
     @require_auth
     def enrol_voice(user_id):
+        if not _voice_enabled():
+            return jsonify({"status": "error", "error": "Voice auth disabled"}), 503
         if not enrolment_manager:
             return jsonify({"status": "error", "error": "Enrolment not available"}), 503
-        result = vr.enrol_user(user_id)
-        if result.get("success"):
-            return jsonify({"status": "success", "data": result}), 200
-        return jsonify({"status": "error", "error": result.get("error", "unknown error")}), 400
+        success, message = enrolment_manager.enrol_voice_user(user_id)
+        if success and "skipped" in message.lower():
+            return jsonify({"status": "error", "error": "Voice enrolment unavailable"}), 503
+        if success:
+            return jsonify({"status": "success", "data": {"user_id": user_id, "message": message}}), 200
+        return jsonify({"status": "error", "error": message}), 400
 
     @app.route("/users/<int:user_id>/enrol/status", methods=["GET"])
     @require_auth
@@ -155,12 +171,20 @@ def create_app(db: DatabaseManager,
         if not user:
             return jsonify({"status": "error", "error": "User not found"}), 404
 
+        voice_enrolled = False
+        if vr is not None:
+            try:
+                voice_enrolled = bool(vr.is_enrolled(user_id))
+            except Exception:
+                voice_enrolled = False
+
         return jsonify({
             "status": "success",
             "data": {
                 "user_id": user_id,
                 "face_enrolled": bool(user["enrolment_status"]),
-                "voice_enrolled": vr.is_enrolled(user_id),
+                "voice_enrolled": voice_enrolled,
+                "voice_enabled": _voice_enabled(),
             }
         }), 200
 
@@ -168,14 +192,28 @@ def create_app(db: DatabaseManager,
     @require_auth
     def dispense_request():
         body = request.get_json(silent=True) or {}
-        user_id = body.get("user_id")
-        schedule_id = body.get("schedule_id")
+        raw_user_id = body.get("user_id")
+        raw_schedule_id = body.get("schedule_id")
         auth_mode = body.get("auth_mode", "face")
 
         if auth_mode not in ("face", "voice"):
             return jsonify({"status": "error", "error": "Invalid auth_mode"}), 400
-        if not user_id:
+        if auth_mode == "voice" and not _voice_enabled():
+            return jsonify({"status": "error", "error": "Voice auth disabled"}), 503
+        if raw_user_id is None:
             return jsonify({"status": "error", "error": "user_id required"}), 400
+
+        try:
+            user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "error": "user_id must be an integer"}), 400
+
+        schedule_id = None
+        if raw_schedule_id is not None:
+            try:
+                schedule_id = int(raw_schedule_id)
+            except (TypeError, ValueError):
+                return jsonify({"status": "error", "error": "schedule_id must be an integer"}), 400
 
         app.config["PENDING_AUTH"] = {
             "user_id": user_id,

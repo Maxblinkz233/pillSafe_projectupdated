@@ -77,6 +77,46 @@ export const api = {
 
   getUsers: () => request('/users'),
 
+  createUser: ({fullName, caregiverPhone, compartmentIndex}) =>
+    request('/users', {
+      method: 'POST',
+      body: {
+        full_name: fullName,
+        caregiver_phone: caregiverPhone,
+        compartment_index: compartmentIndex,
+      },
+    }),
+
+  enrolFace: (userId) =>
+    request(`/users/${userId}/enrol`, {method: 'POST'}),
+
+  enrolVoice: (userId) =>
+    request(`/users/${userId}/enrol/voice`, {method: 'POST'}),
+
+  createSchedule: ({
+    userId,
+    medicationName,
+    doseTime,
+    slotIndex = 0,
+    dosage,
+    pillsPerDose = 1,
+    repeatDays,
+  }) =>
+    request('/schedules', {
+      method: 'POST',
+      body: {
+        user_id: userId,
+        medication_name: medicationName,
+        dose_time: doseTime,
+        slot_index: slotIndex,
+        ...(dosage != null && dosage !== '' ? {dosage} : {}),
+        pills_per_dose: pillsPerDose,
+        ...(repeatDays != null && repeatDays !== ''
+          ? {repeat_days: repeatDays}
+          : {}),
+      },
+    }),
+
   getSchedules: (userId) =>
     request('/schedules', {query: userId != null ? {user_id: userId} : {}}),
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useState} from 'react';
 import {
   View,
   Text,
@@ -7,18 +7,33 @@ import {
   StyleSheet,
   StatusBar,
   ScrollView,
+  Alert,
 } from 'react-native';
-import { User, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
+import {User, Phone} from 'lucide-react-native';
 
-const SignUpScreen = ({ navigation }) => {
+const SignUpScreen = ({navigation}) => {
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [caregiverPhone, setCaregiverPhone] = useState('');
 
-  const handleSignUp = () => navigation.navigate('SlotSelection');
+  const handleSignUp = () => {
+    const name = fullName.trim();
+    const phone = caregiverPhone.trim();
+    if (!name) {
+      Alert.alert('Missing name', 'Enter the patient’s full name.');
+      return;
+    }
+    if (!phone) {
+      Alert.alert(
+        'Missing phone',
+        'Enter a caregiver phone number for SMS alerts (e.g. +233…).',
+      );
+      return;
+    }
+    navigation.navigate('SlotSelection', {
+      fullName: name,
+      caregiverPhone: phone,
+    });
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -29,9 +44,10 @@ const SignUpScreen = ({ navigation }) => {
           <Text style={styles.logoTextPill}>Pill</Text>
           <Text style={styles.logoTextSafe}>Safe</Text>
         </View>
-        <Text style={styles.title}>Create Account</Text>
+        <Text style={styles.title}>Register on Hub</Text>
         <Text style={styles.subtitle}>
-          PillSafe a smart and safe way to manage your medications.
+          Create a patient on the PillSafe dispenser. Biometrics are enrolled
+          on the device camera and microphone — not on this phone.
         </Text>
       </View>
 
@@ -41,89 +57,39 @@ const SignUpScreen = ({ navigation }) => {
           <User size={18} color="#9CA3AF" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
-            placeholder="John Doe"
+            placeholder="Patient full name"
             placeholderTextColor="#9CA3AF"
             value={fullName}
             onChangeText={setFullName}
           />
         </View>
 
-        <Text style={styles.label}>Email Address</Text>
+        <Text style={styles.label}>Caregiver Phone</Text>
         <View style={styles.inputContainer}>
-          <Mail size={18} color="#9CA3AF" style={styles.inputIcon} />
+          <Phone size={18} color="#9CA3AF" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
-            placeholder="name@example.com"
+            placeholder="+233…"
             placeholderTextColor="#9CA3AF"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
+            value={caregiverPhone}
+            onChangeText={setCaregiverPhone}
+            keyboardType="phone-pad"
           />
-        </View>
-
-        <Text style={styles.label}>Password</Text>
-        <View style={styles.inputContainer}>
-          <Lock size={18} color="#9CA3AF" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="••••••••"
-            placeholderTextColor="#9CA3AF"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPassword}
-          />
-          <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-            {showPassword
-              ? <EyeOff size={18} color="#9CA3AF" />
-              : <Eye size={18} color="#9CA3AF" />}
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.label}>Confirm Password</Text>
-        <View style={styles.inputContainer}>
-          <Lock size={18} color="#9CA3AF" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="••••••••"
-            placeholderTextColor="#9CA3AF"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry={!showConfirmPassword}
-          />
-          <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-            {showConfirmPassword
-              ? <EyeOff size={18} color="#9CA3AF" />
-              : <Eye size={18} color="#9CA3AF" />}
-          </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
-          <Text style={styles.signUpButtonText}>Sign Up</Text>
+          <Text style={styles.signUpButtonText}>CONTINUE</Text>
         </TouchableOpacity>
 
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <TouchableOpacity style={styles.googleButton}>
-          <Mail size={20} color="#6B7280" />
-          <Text style={styles.googleButtonText}>Sign up with Google</Text>
+        <TouchableOpacity
+          style={styles.loginLink}
+          onPress={() => navigation.navigate('Login')}>
+          <Text style={styles.loginLinkText}>
+            Already registered?{' '}
+            <Text style={styles.loginLinkBold}>Connect to hub</Text>
+          </Text>
         </TouchableOpacity>
       </View>
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Already have an account? </Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-          <Text style={styles.loginText}>Log in</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.termsText}>
-        By signing up, you agree to our Terms of Service and Privacy Policy.
-      </Text>
     </ScrollView>
   );
 };
@@ -132,145 +98,80 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     backgroundColor: '#EEF0FB',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 60,
+    paddingHorizontal: 20,
     paddingBottom: 40,
+    justifyContent: 'center',
   },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
+  logoContainer: {alignItems: 'center', marginBottom: 28, marginTop: 40},
   logoBadge: {
     flexDirection: 'row',
     backgroundColor: '#3B5BDB',
-    borderRadius: 30,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    marginBottom: 16,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginBottom: 20,
   },
-  logoTextPill: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  logoTextSafe: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#A5F3FC',
-  },
+  logoTextPill: {fontSize: 16, fontWeight: 'bold', color: '#FFFFFF'},
+  logoTextSafe: {fontSize: 16, fontWeight: 'bold', color: '#A5F3FC'},
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
-    color: '#3B5BDB',
+    color: '#111827',
     marginBottom: 8,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
     lineHeight: 20,
+    paddingHorizontal: 10,
   },
   formCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
-    width: '100%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
     elevation: 3,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
     color: '#374151',
     marginBottom: 8,
+    marginTop: 12,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    marginBottom: 16,
-    backgroundColor: '#F9FAFB',
-    height: 48,
+    paddingHorizontal: 14,
+    marginBottom: 4,
   },
-  inputIcon: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    fontSize: 14,
-    color: '#111827',
-  },
+  inputIcon: {marginRight: 10},
+  input: {flex: 1, paddingVertical: 14, fontSize: 15, color: '#111827'},
   signUpButton: {
     backgroundColor: '#3B5BDB',
-    borderRadius: 10,
-    height: 50,
+    borderRadius: 12,
+    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+    marginTop: 24,
   },
   signUpButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 'bold',
+    letterSpacing: 1,
   },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-  dividerText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginHorizontal: 12,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    height: 50,
-    gap: 8,
-  },
-  googleButtonText: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  footer: {
-    flexDirection: 'row',
-    marginTop: 24,
-  },
-  footerText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  loginText: {
-    fontSize: 14,
-    color: '#3B5BDB',
-    fontWeight: '600',
-  },
-  termsText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginTop: 16,
-    paddingHorizontal: 20,
-    lineHeight: 16,
-  },
+  loginLink: {alignItems: 'center', marginTop: 18},
+  loginLinkText: {fontSize: 13, color: '#6B7280'},
+  loginLinkBold: {color: '#3B5BDB', fontWeight: '700'},
 });
 
 export default SignUpScreen;

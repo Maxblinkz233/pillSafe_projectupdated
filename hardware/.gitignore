@@ -22,6 +22,15 @@ ENV/
 # Logs and runtime output
 *.log
 data/*.log
+data/*.db
+*.db
+
+# Runtime biometric / model artifacts (generate locally)
+data/dataset/
+data/models/*.tflite
+!data/models/.gitkeep
+models/voice/
+*.npy
 
 # Packaging and build artifacts
 build/
@@ -31,3 +40,5 @@ dist/
 # Editor and OS files
 .DS_Store
 Thumbs.db
+.vscode/
+.claude/

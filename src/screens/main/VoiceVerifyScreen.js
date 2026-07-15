@@ -106,7 +106,7 @@ const VoiceVerifyScreen = ({navigation, route}) => {
     setErrorMessage('');
     animateWave();
 
-    // Brief UI cue — actual voice capture happens on the Pi mic
+    // Brief UI cue — actual voice capture + match happen on the Pi mic
     setTimeout(async () => {
       stopWave();
       setVoiceState('processing');
@@ -116,7 +116,7 @@ const VoiceVerifyScreen = ({navigation, route}) => {
           scheduleId,
           authMode: 'voice',
         });
-        setTranscript(passphrase);
+        setTranscript('');
         setVoiceState('success');
       } catch (err) {
         setTranscript('');
@@ -124,7 +124,7 @@ const VoiceVerifyScreen = ({navigation, route}) => {
         setVoiceState('failed');
       }
     }, 1500);
-  }, [userId, scheduleId, passphrase]);
+  }, [userId, scheduleId]);
 
   const reset = () => {
     setVoiceState('idle');
@@ -226,20 +226,12 @@ const VoiceVerifyScreen = ({navigation, route}) => {
           voiceState === 'success' && { color: '#10B981' },
           voiceState === 'failed' && { color: '#EF4444' },
         ]}>
-          {voiceState === 'idle' && 'Tap the button to start'}
-          {voiceState === 'listening' && 'Listening... Speak now'}
-          {voiceState === 'processing' && 'Processing voice...'}
-          {voiceState === 'success' && 'Voice Matched!'}
-          {voiceState === 'failed' && 'Voice Not Recognized'}
+          {voiceState === 'idle' && 'Tap to send Verify Now (voice)'}
+          {voiceState === 'listening' && 'Preparing hub request…'}
+          {voiceState === 'processing' && 'Sending request to hub…'}
+          {voiceState === 'success' && 'Request accepted by hub'}
+          {voiceState === 'failed' && 'Request failed'}
         </Text>
-
-        {/* Transcript */}
-        {transcript !== '' && (
-          <View style={styles.transcriptCard}>
-            <Text style={styles.transcriptLabel}>HEARD:</Text>
-            <Text style={styles.transcriptText}>"{transcript}"</Text>
-          </View>
-        )}
       </View>
 
       {/* Result Cards */}
@@ -247,9 +239,10 @@ const VoiceVerifyScreen = ({navigation, route}) => {
         <View style={styles.successCard}>
           <CheckCircle size={20} color="#065F46" />
           <View style={styles.successCardText}>
-            <Text style={styles.successCardTitle}>Identity Confirmed</Text>
+            <Text style={styles.successCardTitle}>Verification Requested</Text>
             <Text style={styles.successCardSub}>
-              Voice pattern matched. Dispensing medication.
+              Speak “{passphrase}” into the hub mic now. Matching and dispense
+              happen on the Pi — this screen only queued the request.
             </Text>
           </View>
         </View>
@@ -259,7 +252,7 @@ const VoiceVerifyScreen = ({navigation, route}) => {
         <View style={styles.failedCard}>
           <XCircle size={20} color="#991B1B" />
           <View style={styles.failedCardText}>
-            <Text style={styles.failedCardTitle}>Verification Failed</Text>
+            <Text style={styles.failedCardTitle}>Could Not Reach Hub</Text>
             <Text style={styles.failedCardSub}>
               {errorMessage || 'Voice request failed. Check hub connection and try again.'}
             </Text>

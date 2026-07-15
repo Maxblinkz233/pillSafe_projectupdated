@@ -65,6 +65,15 @@ class DatabaseManager:
                 conn.execute(f"ALTER TABLE Schedules ADD COLUMN {col} {ddl}")
                 logger.info("Migration: added Schedules.%s", col)
 
+        adherence_cols = columns("AdherenceLog")
+        if "auth_mode" not in adherence_cols:
+            conn.execute("ALTER TABLE AdherenceLog ADD COLUMN auth_mode TEXT")
+            logger.info("Migration: added AdherenceLog.auth_mode")
+
+        # Face embeddings live on disk (data/dataset/<id>/embeddings.npy),
+        # not in SQLite — drop the unused table if present.
+        conn.execute("DROP TABLE IF EXISTS FaceEmbeddings")
+
     # ── User Operations ──────────────────────────────────────
 
     def create_user(self, full_name: str, caregiver_phone: str,
@@ -233,18 +242,22 @@ class DatabaseManager:
 
     def log_event(self, user_id: int, schedule_id: int,
                   scheduled_time: str, outcome: str,
-                  actual_time: str | None = None) -> int:
+                  actual_time: str | None = None,
+                  auth_mode: str | None = None) -> int:
         with _lock:
             conn = self._get_connection()
             try:
                 cursor = conn.execute(
                     "INSERT INTO AdherenceLog "
-                    "(user_id, schedule_id, scheduled_time, actual_time, outcome) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (user_id, schedule_id, scheduled_time, actual_time, outcome),
+                    "(user_id, schedule_id, scheduled_time, actual_time, outcome, auth_mode) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (user_id, schedule_id, scheduled_time, actual_time, outcome, auth_mode),
                 )
                 conn.commit()
-                logger.info("Logged %s for user %d, schedule %d", outcome, user_id, schedule_id)
+                logger.info(
+                    "Logged %s for user %d, schedule %d (auth_mode=%s)",
+                    outcome, user_id, schedule_id, auth_mode,
+                )
                 return cursor.lastrowid
             finally:
                 conn.close()
