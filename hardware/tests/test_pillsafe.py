@@ -139,3 +139,61 @@ def test_notifications_feed(db):
     assert db.get_notifications(uid, unread_only=True) == [] or all(
         n["notification_id"] != nid for n in db.get_notifications(uid, unread_only=True)
     )
+
+
+def test_adherence_log_stores_auth_mode(db):
+    uid = db.create_user("Kwame", "+233200000004", 4)
+    sid = db.create_schedule(uid, "Atorvastatin", "20:00", slot_index=1)
+    log_id = db.log_event(uid, sid, "20:00", "TAKEN", actual_time="20:01", auth_mode="voice")
+    logs = db.get_adherence_logs(uid)
+    row = next(r for r in logs if r["log_id"] == log_id)
+    assert row["auth_mode"] == "voice"
+    assert row["outcome"] == "TAKEN"
+
+
+def test_face_verification_returns_no_face_when_empty(_config, monkeypatch):
+    """Absent patient must yield NO_FACE (grace/retry), not REJECTED lockout."""
+    from core.decision import DecisionEngine, VerificationResult
+
+    class _FakeCamera:
+        def capture_frame(self):
+            return object()
+
+    class _FakeDetector:
+        def detect_and_extract(self, _frame):
+            return []
+
+    class _FakeRecogniser:
+        is_trained = True
+
+        def predict(self, _roi):
+            raise AssertionError("predict should not run without a face")
+
+    engine = DecisionEngine(_FakeCamera(), _FakeDetector(), _FakeRecogniser())
+    monkeypatch.setattr(engine, "max_retries", 2)
+    monkeypatch.setattr("core.decision.time.sleep", lambda _s: None)
+
+    outcome = engine.run_verification(expected_user_id=1, auth_mode="face")
+    assert outcome.result == VerificationResult.NO_FACE
+    assert outcome.attempt == 2
+
+
+def test_voice_auth_unavailable_returns_audio_error(_config):
+    from core.decision import DecisionEngine, VerificationResult
+
+    class _FakeCamera:
+        def capture_frame(self):
+            return None
+
+    class _FakeDetector:
+        def detect_and_extract(self, _frame):
+            return []
+
+    class _FakeRecogniser:
+        is_trained = True
+
+    engine = DecisionEngine(
+        _FakeCamera(), _FakeDetector(), _FakeRecogniser(), voice_recogniser=None
+    )
+    outcome = engine.run_verification(expected_user_id=1, auth_mode="voice")
+    assert outcome.result == VerificationResult.AUDIO_ERROR

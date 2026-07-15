@@ -55,7 +55,12 @@ from scheduler.schedule_controller import ScheduleController, DispenseEvent
 from alerts.alert_service import AlertService
 from enrollment.enrol_user import EnrolmentManager
 from api.routes import create_app
-from core.voice_recogniser import VoiceRecogniser
+
+try:
+    from core.voice_recogniser import VoiceRecogniser
+except Exception:  # pragma: no cover - optional when sounddevice/librosa missing
+    VoiceRecogniser = None
+
 
 class PillSafeSystem:
     """Main system controller — orchestrates all PillSafe components."""
@@ -84,15 +89,22 @@ class PillSafeSystem:
         logger.info("Initialising facial recognition pipeline...")
         self.detector = FaceDetector()
         self.recogniser = FaceNetRecogniser()
-        try:
-            self.voice_recogniser = VoiceRecogniser()
-            logger.info("Voice recogniser initialised")
-        except Exception as e:
-            logger.warning("Voice recogniser unavailable: %s — voice auth disabled", e)
-            self.voice_recogniser = None
+        voice_cfg = getattr(cfg, "voice", None)
+        voice_enabled = bool(voice_cfg and getattr(voice_cfg, "enabled", False))
+        self.voice_recogniser = None
+        if voice_enabled and VoiceRecogniser is not None:
+            try:
+                self.voice_recogniser = VoiceRecogniser()
+                logger.info("Voice recogniser initialised")
+            except Exception as e:
+                logger.warning("Voice recogniser unavailable: %s — voice auth disabled", e)
+        elif not voice_enabled:
+            logger.info("Voice auth disabled in config (voice.enabled=false)")
+        else:
+            logger.warning("Voice dependencies missing — voice auth disabled")
         self.decision_engine = DecisionEngine(
             self.camera, self.detector, self.recogniser, self.voice_recogniser
-)
+        )
 
         # ── Step 4: Enrolment Manager ────────────────────────
         self.enrolment = EnrolmentManager(
@@ -219,9 +231,9 @@ class PillSafeSystem:
 
         if outcome.result == VerificationResult.ACCEPTED:
             logger.info("User %d verified — dispensing medication", event.user_id)
-            self._perform_dispense(event)
+            self._perform_dispense(event, auth_mode=auth_mode)
         elif outcome.result == VerificationResult.REJECTED:
-            self._log_and_alert_rejected(event)
+            self._log_and_alert_rejected(event, auth_mode=auth_mode)
         elif outcome.result == VerificationResult.NO_FACE:
             logger.info("No face detected — waiting for grace period to expire")
             self._wait_for_grace_period(event)
@@ -260,10 +272,10 @@ class PillSafeSystem:
 
             if outcome.result == VerificationResult.ACCEPTED:
                 logger.info("User %d verified — dispensing medication", event.user_id)
-                self._perform_dispense(event)
+                self._perform_dispense(event, auth_mode=auth_mode)
                 return
             if outcome.result == VerificationResult.REJECTED:
-                self._log_and_alert_rejected(event)
+                self._log_and_alert_rejected(event, auth_mode=auth_mode)
                 return
             # NO_FACE / model-not-ready / audio error → let the user try again
             logger.info("Verification incomplete (%s) — awaiting another Verify Now",
@@ -278,36 +290,74 @@ class PillSafeSystem:
         pending = self.app.config.get("PENDING_AUTH")
         if not pending:
             return None
-        if pending.get("user_id") != event.user_id:
+        try:
+            pending_uid = int(pending.get("user_id"))
+        except (TypeError, ValueError):
+            return None
+        if pending_uid != event.user_id:
             return None
         sid = pending.get("schedule_id")
-        if sid is not None and sid != event.schedule_id:
-            return None
+        if sid is not None:
+            try:
+                if int(sid) != event.schedule_id:
+                    return None
+            except (TypeError, ValueError):
+                return None
         self.app.config["PENDING_AUTH"] = None
+        pending = dict(pending)
+        pending["user_id"] = pending_uid
+        if sid is not None:
+            pending["schedule_id"] = int(sid)
         return pending
 
     # ── Dispense + outcome helpers ───────────────────────────
 
-    def _perform_dispense(self, event: DispenseEvent) -> bool:
+    def _perform_dispense(self, event: DispenseEvent, auth_mode: str = "face") -> bool:
         """
         Rotate the compartment to the target slot, confirm the drop and the
         pickup via the IR sensors, then log TAKEN, update inventory and
-        notify the app. Returns True if the dose was dispensed.
+        notify the app. Returns True if the dose was dispensed and collected.
         """
         # Rotate the compartment's cylinder so the slot aligns with the hole
         rotated = self.dispenser.rotate_to(event.compartment_index, event.slot_index)
         if not rotated:
-            self._handle_mechanical_error(event)
+            self._handle_mechanical_error(event, auth_mode=auth_mode)
             return False
 
         # IR confirms the pill fell through the delivery tube
         pill_dropped = self.ir_sensors.wait_for_pill_drop(timeout=5.0)
         if not pill_dropped:
-            self._handle_mechanical_error(event)
+            self._handle_mechanical_error(event, auth_mode=auth_mode)
             return False
 
         # IR confirms the user collected the pill from the base
-        self.ir_sensors.wait_for_pickup(timeout=120.0)
+        picked_up = self.ir_sensors.wait_for_pickup(timeout=120.0)
+        if not picked_up:
+            logger.warning(
+                "Pill dropped for user %d but was not collected within timeout",
+                event.user_id,
+            )
+            self.db.log_event(
+                user_id=event.user_id,
+                schedule_id=event.schedule_id,
+                scheduled_time=event.scheduled_time,
+                outcome="MECHANICAL_ERROR",
+                auth_mode=auth_mode,
+            )
+            self.buzzer.play("failure")
+            # Pill left the compartment — still decrement stock
+            self._update_inventory_after_dispense(event)
+            self._notify(
+                "MECHANICAL_ERROR",
+                f"{event.medication_name} dispensed for {event.full_name} "
+                f"but not collected from the tray",
+                user_id=event.user_id,
+            )
+            self.alert_service.send_immediate_alert(
+                event.user_id, event.schedule_id,
+                "MECHANICAL_ERROR", event.scheduled_time,
+            )
+            return False
 
         actual_time = datetime.now().strftime("%H:%M")
         self.db.log_event(
@@ -316,6 +366,7 @@ class PillSafeSystem:
             scheduled_time=event.scheduled_time,
             outcome="TAKEN",
             actual_time=actual_time,
+            auth_mode=auth_mode,
         )
         self.buzzer.play("success")
         self._update_inventory_after_dispense(event)
@@ -356,13 +407,14 @@ class PillSafeSystem:
             except Exception as e:
                 logger.error("Low-inventory SMS failed: %s", e)
 
-    def _log_and_alert_rejected(self, event: DispenseEvent) -> None:
+    def _log_and_alert_rejected(self, event: DispenseEvent, auth_mode: str = "face") -> None:
         logger.warning("Verification REJECTED for user %d — lockout", event.user_id)
         self.db.log_event(
             user_id=event.user_id,
             schedule_id=event.schedule_id,
             scheduled_time=event.scheduled_time,
             outcome="REJECTED",
+            auth_mode=auth_mode,
         )
         self.buzzer.play("failure")
         self._notify(
@@ -374,13 +426,14 @@ class PillSafeSystem:
             event.user_id, event.schedule_id, "REJECTED", event.scheduled_time,
         )
 
-    def _log_and_alert_missed(self, event: DispenseEvent) -> None:
+    def _log_and_alert_missed(self, event: DispenseEvent, auth_mode: str | None = None) -> None:
         logger.warning("Grace period expired — dose MISSED for user %d", event.user_id)
         self.db.log_event(
             user_id=event.user_id,
             schedule_id=event.schedule_id,
             scheduled_time=event.scheduled_time,
             outcome="MISSED",
+            auth_mode=auth_mode,
         )
         self.buzzer.play("missed")
         self._notify(
@@ -417,29 +470,32 @@ class PillSafeSystem:
             if not self._running:
                 break
 
-            frame = self.camera.capture_frame()
-            if frame is None:
-                continue
+            pending = self.app.config.get("PENDING_AUTH") or {}
+            auth_mode = pending.get("mode", "face")
 
-            detections = self.detector.detect_and_extract(frame)
-            if len(detections) == 0:
-                continue
+            if auth_mode == "face":
+                frame = self.camera.capture_frame()
+                if frame is None:
+                    continue
+                detections = self.detector.detect_and_extract(frame)
+                if len(detections) == 0:
+                    continue
 
-            # Someone appeared — run full verification against the scheduled user
             outcome = self.decision_engine.run_verification(
-                expected_user_id=event.user_id
+                expected_user_id=event.user_id,
+                auth_mode=auth_mode,
             )
 
             if outcome.result == VerificationResult.ACCEPTED:
                 # Late but still within grace period
-                if self._perform_dispense(event):
+                if self._perform_dispense(event, auth_mode=auth_mode):
                     logger.info("Late dose dispensed within grace period")
                     return
 
         # Grace period expired — mark as MISSED
         self._log_and_alert_missed(event)
 
-    def _handle_mechanical_error(self, event: DispenseEvent) -> None:
+    def _handle_mechanical_error(self, event: DispenseEvent, auth_mode: str = "face") -> None:
         """Handle a mechanical dispensing failure."""
         logger.error("MECHANICAL ERROR during dispensing for user %d", event.user_id)
         self.db.log_event(
@@ -447,6 +503,7 @@ class PillSafeSystem:
             schedule_id=event.schedule_id,
             scheduled_time=event.scheduled_time,
             outcome="MECHANICAL_ERROR",
+            auth_mode=auth_mode,
         )
         self.buzzer.play("failure")
         self._notify(

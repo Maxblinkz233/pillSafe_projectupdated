@@ -1,2 +1,4 @@
-# This directory stores trained LBPH models.
-# The model file (lbph_model.yml) is generated during enrolment.
+# Place the MobileFaceNet TFLite model here as:
+#   mobilefacenet.tflite
+#
+# Download with: bash scripts/download_model.sh

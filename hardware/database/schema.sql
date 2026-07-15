@@ -6,22 +6,9 @@ CREATE TABLE IF NOT EXISTS Users (
     caregiver_phone     TEXT    NOT NULL,
     compartment_index   INTEGER NOT NULL UNIQUE CHECK (compartment_index BETWEEN 0 AND 5),
     enrolment_status    INTEGER DEFAULT 0 CHECK (enrolment_status IN (0, 1)),
-    recognition_model   TEXT    DEFAULT 'facenet' CHECK (recognition_model IN ('lbph', 'facenet')),
+    recognition_model   TEXT    DEFAULT 'facenet',
     created_at          TEXT    DEFAULT (datetime('now'))
 );
-
--- Store face embeddings for FaceNet-based recognition
-CREATE TABLE IF NOT EXISTS FaceEmbeddings (
-    embedding_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id             INTEGER NOT NULL,
-    embedding_data      BLOB    NOT NULL,  -- numpy array stored as binary
-    source_image_path   TEXT,               -- path to source face image
-    created_at          TEXT    DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
-);
-
--- Create index for faster embedding lookups
-CREATE INDEX IF NOT EXISTS idx_face_embeddings_user_id ON FaceEmbeddings(user_id);
 
 -- A schedule is a recurring dose. Each schedule targets a specific
 -- (compartment, slot): the compartment belongs to the user, and the
@@ -64,6 +51,7 @@ CREATE TABLE IF NOT EXISTS AdherenceLog (
     scheduled_time      TEXT    NOT NULL,
     actual_time         TEXT,
     outcome             TEXT    NOT NULL CHECK (outcome IN ('TAKEN', 'MISSED', 'REJECTED', 'MECHANICAL_ERROR')),
+    auth_mode           TEXT    CHECK (auth_mode IS NULL OR auth_mode IN ('face', 'voice')),
     sms_sent            INTEGER DEFAULT 0 CHECK (sms_sent IN (0, 1)),
     acknowledged        INTEGER DEFAULT 0 CHECK (acknowledged IN (0, 1)),
     logged_at           TEXT    DEFAULT (datetime('now')),

@@ -2,7 +2,8 @@
 PillSafe — Scheduling & Dispensing Controller
 Polls the DS3231 RTC and triggers dispensing events when scheduled
 times are matched (FR-12, FR-13, FR-16).
-Uses APScheduler for the background daemon.
+
+Uses a background thread with a simple polling loop (no APScheduler).
 """
 
 import time

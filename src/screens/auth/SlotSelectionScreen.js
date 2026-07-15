@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   View,
   Text,
@@ -6,26 +6,98 @@ import {
   StyleSheet,
   StatusBar,
   ScrollView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { CheckCircle } from 'lucide-react-native';
-import { slots } from '../../data/mockData';
+import {CheckCircle} from 'lucide-react-native';
+import {api} from '../../services/api';
+import {saveApiConfig} from '../../services/config';
 
-const SlotSelectionScreen = ({ navigation }) => {
-  const [selectedSlot, setSelectedSlot] = useState('C');
+const COMPARTMENTS = [
+  {id: 'A', index: 0},
+  {id: 'B', index: 1},
+  {id: 'C', index: 2},
+  {id: 'D', index: 3},
+  {id: 'E', index: 4},
+  {id: 'F', index: 5},
+];
+
+const SlotSelectionScreen = ({navigation, route}) => {
+  const fullName = route?.params?.fullName || '';
+  const caregiverPhone = route?.params?.caregiverPhone || '';
+  const [selectedIndex, setSelectedIndex] = useState(2);
+  const [saving, setSaving] = useState(false);
+  const [occupied, setOccupied] = useState(new Set());
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const users = await api.getUsers();
+        if (!active) return;
+        setOccupied(
+          new Set((users || []).map(u => Number(u.compartment_index))),
+        );
+      } catch {
+        // Hub may be offline during UI walkthrough
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleContinue = async () => {
+    if (!fullName || !caregiverPhone) {
+      Alert.alert(
+        'Missing signup details',
+        'Go back and enter name and caregiver phone first.',
+      );
+      return;
+    }
+    if (occupied.has(selectedIndex)) {
+      Alert.alert('Slot in use', 'Choose an available compartment.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await api.createUser({
+        fullName,
+        caregiverPhone,
+        compartmentIndex: selectedIndex,
+      });
+      const userId = result?.user_id;
+      if (userId == null) {
+        throw new Error('Hub did not return a user_id');
+      }
+      await saveApiConfig({userId, userName: fullName});
+      navigation.navigate('FaceEnroll');
+    } catch (err) {
+      Alert.alert(
+        'Could not create user',
+        err.message ||
+          'Check Device Connection (hub URL + token) and try again.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>M</Text>
+            <Text style={styles.avatarText}>
+              {(fullName || 'P').slice(0, 1).toUpperCase()}
+            </Text>
           </View>
           <View>
             <Text style={styles.patientLabel}>Patient</Text>
-            <Text style={styles.userName}>Maxwell</Text>
+            <Text style={styles.userName}>{fullName || 'New patient'}</Text>
           </View>
         </View>
         <View style={styles.logoBadge}>
@@ -34,101 +106,70 @@ const SlotSelectionScreen = ({ navigation }) => {
         </View>
       </View>
 
-      {/* Progress Steps */}
-      <View style={styles.progressRow}>
-        <View style={styles.progressStep}>
-          <View style={[styles.stepCircle, styles.stepDone]}>
-            <CheckCircle size={18} color="#FFFFFF" />
-          </View>
-          <Text style={styles.stepLabel}>Personal</Text>
-        </View>
-        <View style={styles.progressLine} />
-        <View style={styles.progressStep}>
-          <View style={[styles.stepCircle, styles.stepActive]}>
-            <View style={styles.stepActiveDot} />
-          </View>
-          <Text style={[styles.stepLabel, { color: '#3B5BDB' }]}>Slot</Text>
-        </View>
-        <View style={styles.progressLine} />
-        <View style={styles.progressStep}>
-          <View style={styles.stepCircle}>
-            <View style={styles.stepInactiveDot} />
-          </View>
-          <Text style={styles.stepLabel}>Face</Text>
-        </View>
-      </View>
-
-      {/* Title */}
-      <Text style={styles.title}>Assign Dispenser Slot</Text>
+      <Text style={styles.title}>Assign Dispenser Compartment</Text>
       <Text style={styles.subtitle}>
-        Choose an available slot for the patient's primary medication cycle.
+        Each patient owns one compartment (0–5) on the hub cylinder.
       </Text>
 
-      {/* Slots Grid */}
       <View style={styles.slotsGrid}>
-        {slots.map(slot => (
-          <TouchableOpacity
-            key={slot.id}
-            style={[
-              styles.slotCard,
-              slot.status === 'inuse' && styles.slotCardInuse,
-              selectedSlot === slot.id && styles.slotCardSelected,
-            ]}
-            onPress={() => {
-              if (slot.status !== 'inuse') setSelectedSlot(slot.id);
-            }}
-            disabled={slot.status === 'inuse'}>
-            <Text
+        {COMPARTMENTS.map(slot => {
+          const inUse = occupied.has(slot.index);
+          const selected = selectedIndex === slot.index;
+          return (
+            <TouchableOpacity
+              key={slot.id}
               style={[
-                styles.slotLetter,
-                slot.status === 'inuse' && styles.slotLetterInuse,
-                selectedSlot === slot.id && styles.slotLetterSelected,
-              ]}>
-              {slot.id}
-            </Text>
-            {selectedSlot === slot.id ? (
-              <View style={styles.selectedRow}>
-                <CheckCircle size={14} color="#3B5BDB" />
-                <Text style={styles.selectedText}>Selected</Text>
-              </View>
-            ) : (
+                styles.slotCard,
+                inUse && styles.slotCardInuse,
+                selected && !inUse && styles.slotCardSelected,
+              ]}
+              onPress={() => {
+                if (!inUse) setSelectedIndex(slot.index);
+              }}
+              disabled={inUse}>
               <Text
                 style={[
-                  styles.slotStatus,
-                  slot.status === 'inuse'
-                    ? styles.slotStatusInuse
-                    : styles.slotStatusAvailable,
+                  styles.slotLetter,
+                  inUse && styles.slotLetterInuse,
+                  selected && !inUse && styles.slotLetterSelected,
                 ]}>
-                {slot.status === 'inuse' ? 'In use' : 'Available'}
+                {slot.id}
               </Text>
-            )}
-          </TouchableOpacity>
-        ))}
+              {selected && !inUse ? (
+                <View style={styles.selectedRow}>
+                  <CheckCircle size={14} color="#3B5BDB" />
+                  <Text style={styles.selectedText}>Selected</Text>
+                </View>
+              ) : (
+                <Text
+                  style={[
+                    styles.slotStatus,
+                    inUse ? styles.slotStatusInuse : styles.slotStatusAvailable,
+                  ]}>
+                  {inUse ? 'In use' : `Compartment ${slot.index}`}
+                </Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {/* Legend */}
-      <View style={styles.legend}>
-        <View style={styles.legendItem}>
-          <View style={styles.legendDotGray} />
-          <Text style={styles.legendText}>Occupied</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={styles.legendDotBlue} />
-          <Text style={styles.legendText}>Current Selection</Text>
-        </View>
-      </View>
-
-      {/* Buttons */}
       <View style={styles.buttonRow}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}>
+          onPress={() => navigation.goBack()}
+          disabled={saving}>
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.continueButton}
-          onPress={() => navigation.navigate('FaceEnroll')}>
-          <Text style={styles.continueButtonText}>Continue</Text>
+          style={[styles.continueButton, saving && styles.continueDisabled]}
+          onPress={handleContinue}
+          disabled={saving}>
+          {saving ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.continueButtonText}>Create & Continue</Text>
+          )}
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -149,11 +190,7 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     marginBottom: 24,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  headerLeft: {flexDirection: 'row', alignItems: 'center', gap: 12},
   avatar: {
     width: 40,
     height: 40,
@@ -162,20 +199,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  patientLabel: {
-    fontSize: 11,
-    color: '#6B7280',
-  },
-  userName: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#111827',
-  },
+  avatarText: {color: '#FFFFFF', fontSize: 16, fontWeight: 'bold'},
+  patientLabel: {fontSize: 11, color: '#6B7280'},
+  userName: {fontSize: 15, fontWeight: 'bold', color: '#111827'},
   logoBadge: {
     flexDirection: 'row',
     backgroundColor: '#3B5BDB',
@@ -183,193 +209,65 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  logoTextPill: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  logoTextSafe: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#A5F3FC',
-  },
-  progressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 28,
-    gap: 4,
-  },
-  progressStep: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  stepCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  stepDone: {
-    backgroundColor: '#10B981',
-    borderColor: '#10B981',
-  },
-  stepActive: {
-    borderColor: '#3B5BDB',
-    backgroundColor: '#3B5BDB',
-  },
-  stepActiveDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#FFFFFF',
-  },
-  stepInactiveDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#D1D5DB',
-  },
-  stepLabel: {
-    fontSize: 11,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  progressLine: {
-    width: 60,
-    height: 2,
-    backgroundColor: '#3B5BDB',
-    marginBottom: 18,
-  },
+  logoTextPill: {fontSize: 14, fontWeight: 'bold', color: '#FFFFFF'},
+  logoTextSafe: {fontSize: 14, fontWeight: 'bold', color: '#A5F3FC'},
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#111827',
     marginBottom: 8,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
     color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
     lineHeight: 20,
-    marginBottom: 24,
   },
   slotsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    marginBottom: 28,
   },
   slotCard: {
-    width: '47%',
+    width: '30%',
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    padding: 20,
+    paddingVertical: 18,
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#E5E7EB',
+    gap: 6,
   },
-  slotCardInuse: {
-    backgroundColor: '#F9FAFB',
-    borderColor: '#F3F4F6',
-  },
-  slotCardSelected: {
-    borderColor: '#3B5BDB',
-    backgroundColor: '#EEF2FF',
-  },
-  slotLetter: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 6,
-  },
-  slotLetterInuse: {
-    color: '#D1D5DB',
-  },
-  slotLetterSelected: {
-    color: '#3B5BDB',
-  },
-  slotStatus: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  slotStatusAvailable: {
-    color: '#10B981',
-  },
-  slotStatusInuse: {
-    color: '#9CA3AF',
-  },
-  selectedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  selectedText: {
-    fontSize: 12,
-    color: '#3B5BDB',
-    fontWeight: '600',
-  },
-  legend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 24,
-    marginBottom: 24,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  legendDotGray: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#D1D5DB',
-  },
-  legendDotBlue: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#3B5BDB',
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
+  slotCardInuse: {backgroundColor: '#F3F4F6', borderColor: '#E5E7EB'},
+  slotCardSelected: {borderColor: '#3B5BDB', backgroundColor: '#EEF2FF'},
+  slotLetter: {fontSize: 22, fontWeight: 'bold', color: '#111827'},
+  slotLetterInuse: {color: '#9CA3AF'},
+  slotLetterSelected: {color: '#3B5BDB'},
+  selectedRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
+  selectedText: {fontSize: 11, color: '#3B5BDB', fontWeight: '600'},
+  slotStatus: {fontSize: 11, fontWeight: '500'},
+  slotStatusAvailable: {color: '#6B7280'},
+  slotStatusInuse: {color: '#9CA3AF'},
+  buttonRow: {flexDirection: 'row', gap: 12},
   backButton: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
   },
-  backButtonText: {
-    fontSize: 15,
-    color: '#374151',
-    fontWeight: '600',
-  },
+  backButtonText: {fontSize: 14, color: '#3B5BDB', fontWeight: '700'},
   continueButton: {
-    flex: 2,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 12,
+    flex: 1,
     backgroundColor: '#3B5BDB',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
   },
-  continueButtonText: {
-    fontSize: 15,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
+  continueDisabled: {opacity: 0.7},
+  continueButtonText: {color: '#FFFFFF', fontSize: 15, fontWeight: 'bold'},
 });
 
 export default SlotSelectionScreen;

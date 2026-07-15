@@ -50,7 +50,7 @@ class DecisionEngine:
     """Coordinates camera, detection, face recognition, and voice verification."""
 
     def __init__(self, camera: Camera, detector: FaceDetector,
-                 recogniser: FaceNetRecogniser, voice_recogniser: VoiceRecogniser | None = None):
+                 recogniser: FaceNetRecogniser, voice_recogniser=None):
         cfg = get_config()
         self.camera = camera
         self.detector = detector
@@ -76,6 +76,12 @@ class DecisionEngine:
             Either modality alone is sufficient to unlock dispensing (OR logic).
         """
         if auth_mode == "voice":
+            if self.voice_recogniser is None:
+                logger.error("Voice auth requested but voice recogniser is unavailable")
+                return VerificationOutcome(
+                    result=VerificationResult.AUDIO_ERROR,
+                    auth_mode="voice",
+                )
             return self._run_voice_verification(expected_user_id)
         return self._run_face_verification(expected_user_id)
 
@@ -84,7 +90,8 @@ class DecisionEngine:
     def _run_face_verification(self, expected_user_id: int | None) -> VerificationOutcome:
         """
         Execute the full face verification pipeline with retry logic (FR-08).
-        Up to max_retries attempts before returning REJECTED.
+        Returns NO_FACE if no face was ever seen; REJECTED only after a face
+        was detected but failed identity/confidence checks.
         """
         if not self.recogniser.is_trained:
             logger.error("Face recognition model not loaded")
@@ -92,6 +99,8 @@ class DecisionEngine:
                 result=VerificationResult.MODEL_NOT_READY,
                 auth_mode="face"
             )
+
+        saw_face = False
 
         for attempt in range(1, self.max_retries + 1):
             logger.info("Face verification attempt %d/%d", attempt, self.max_retries)
@@ -107,6 +116,7 @@ class DecisionEngine:
                 time.sleep(1)
                 continue
 
+            saw_face = True
             roi, bbox = max(detections, key=lambda d: d[1][2] * d[1][3])
 
             user_id, confidence = self.recogniser.predict(roi)
@@ -131,14 +141,25 @@ class DecisionEngine:
                     attempt=attempt,
                     auth_mode="face",
                 )
-            else:
-                logger.info(
-                    "REJECTED attempt %d: predicted=%s expected=%s confidence=%.4f "
-                    "dist=%.4f (confident=%s close=%s identity=%s)",
-                    attempt, user_id, expected_user_id, confidence, distance,
-                    confident, close_enough, identity_ok,
-                )
-                time.sleep(1)
+
+            logger.info(
+                "REJECTED attempt %d: predicted=%s expected=%s confidence=%.4f "
+                "dist=%.4f (confident=%s close=%s identity=%s)",
+                attempt, user_id, expected_user_id, confidence, distance,
+                confident, close_enough, identity_ok,
+            )
+            time.sleep(1)
+
+        if not saw_face:
+            logger.warning(
+                "Face verification ended with no face detected after %d attempts",
+                self.max_retries,
+            )
+            return VerificationOutcome(
+                result=VerificationResult.NO_FACE,
+                attempt=self.max_retries,
+                auth_mode="face",
+            )
 
         logger.warning("Face verification FAILED after %d attempts — lockout", self.max_retries)
         return VerificationOutcome(

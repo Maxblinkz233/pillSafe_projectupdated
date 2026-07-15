@@ -183,6 +183,13 @@ def run_cli_enrolment():
     Command-line enrolment tool for initial setup.
     Usage: python -m enrollment.enrol_user
     """
+    import os
+    import sys
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+    os.chdir(project_root)
+
     from utils.config import load_config
     load_config()
 

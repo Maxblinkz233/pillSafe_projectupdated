@@ -384,7 +384,7 @@ RTC polls every 60s → Schedule match (time + repeat-day)? → REMINDER notif +
 | Parameter                       | Default | Description                                  |
 |---------------------------------|---------|----------------------------------------------|
 | face.confidence_threshold       | 60      | FaceNet match score 0–100 = (1−cosine_dist)×100 (higher = stricter) |
-| face.distance_threshold         | 0.6     | Max cosine distance for a valid match         |
+| face.distance_threshold         | 0.4     | Max cosine distance (= matches confidence 60) |
 | face.max_retries                | 8       | Verification attempts before lockout         |
 | face.sample_count               | 50      | Images captured during enrolment             |
 | schedule.grace_period_minutes   | 15      | Window before marking dose as MISSED         |

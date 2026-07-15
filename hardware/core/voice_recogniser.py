@@ -175,7 +175,7 @@ def enrol_user(user_id: int, prompts: list[str] | None = None) -> dict:
     Capture ENROL_SAMPLES utterances, compute mean MFCC template,
     and save to disk.
 
-    Called by: POST /users/{id}/enrol  (voice=true query param)
+    Called by: POST /users/{id}/enrol/voice
 
     Returns:
         {"success": True, "user_id": user_id}  on success
