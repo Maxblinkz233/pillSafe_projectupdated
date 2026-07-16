@@ -21,3 +21,9 @@ Wiring,Dupont jumper wires M-F,40+,Pi GPIO to modules,
 Wiring,Dupont jumper wires M-M,20+,Breadboard links,
 Wiring,Breadboard or perfboard,1-2,Prototyping,
 Wiring,GND bus / terminal block,1,Common ground for all supplies,
+Passives,Electrolytic capacitor 1000µF 16V,1,Across external 5V servo rail,docs/WIRING_GUIDE.md
+Passives,Electrolytic capacitor 1000µF 10V,0–1,Across SIM800C VCC if not onboard,docs/WIRING_GUIDE.md
+Passives,Series resistor 220–470Ω,0–6,Optional on each servo PWM line,docs/WIRING_GUIDE.md
+Passives,Resistor 10kΩ + 20kΩ,0–1 pair,SIM800C TX→Pi RX divider only if TX>3.3V,docs/WIRING_GUIDE.md
+Passives,Resistor 4.7kΩ,0–2,I2C pull-ups only for bare DS3231 IC,docs/WIRING_GUIDE.md
+Passives,Hook-up wire 18–22 AWG,1 spool,Thick +5V/GND for servo rail,

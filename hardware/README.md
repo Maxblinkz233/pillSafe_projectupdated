@@ -65,7 +65,8 @@ pillsafe/
 
 ## Hardware Wiring Guide
 
-> **BOM:** Parts list is in [`docs/bom.csv`](docs/bom.csv).
+> **Full circuit (every wire, resistor, capacitor):** [`docs/WIRING_GUIDE.md`](docs/WIRING_GUIDE.md)  
+> **BOM:** [`docs/bom.csv`](docs/bom.csv) · **Net checklist:** [`docs/fritzing_connections.csv`](docs/fritzing_connections.csv)
 
 ### GPIO Pin Assignment (BCM Numbering)
 

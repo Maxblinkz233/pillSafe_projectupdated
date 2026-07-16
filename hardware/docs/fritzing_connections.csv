@@ -1,44 +1,60 @@
 Net,From,From pin/signal,To,To pin/signal,Wire colour (suggested),Notes
-GND,Pi,Any GND pin,Servo 0,GND,Brown,Repeat GND for all servos
-GND,Pi,Any GND pin,Servo 1,GND,Brown,
-GND,Pi,Any GND pin,Servo 2,GND,Brown,
-GND,Pi,Any GND pin,Servo 3,GND,Brown,
-GND,Pi,Any GND pin,Servo 4,GND,Brown,
-GND,Pi,Any GND pin,Servo 5,GND,Brown,
-GND,Pi,Any GND pin,External 5V PSU,GND,Black,Common ground mandatory
-GND,Pi,Any GND pin,DS3231,GND,Black,
-GND,Pi,Any GND pin,IR drop,GND,Black,
-GND,Pi,Any GND pin,IR pickup,GND,Black,
-GND,Pi,Any GND pin,Buzzer,GND,Black,
-GND,Pi,Any GND pin,INMP441,GND,Black,Optional voice
-GND,Pi,Any GND pin,SIM800L,GND,Black,LiPo GND also here
-3V3,Pi,Pin 1 (3.3V),DS3231,VCC,Red,
+GND,Pi,Pin 6/9/14/20 GND,GND bus,Common,Black,Star ground for all supplies
+GND,External 5V PSU,GND,GND bus,Common,Black,Mandatory — share with Pi
+GND,LiPo 3.7V,−,GND bus,Common,Black,SIM800C return path
+GND,GND bus,Common,Servo 0,GND,Brown,Repeat for servos 1–5
+GND,GND bus,Common,Servo 1,GND,Brown,
+GND,GND bus,Common,Servo 2,GND,Brown,
+GND,GND bus,Common,Servo 3,GND,Brown,
+GND,GND bus,Common,Servo 4,GND,Brown,
+GND,GND bus,Common,Servo 5,GND,Brown,
+GND,GND bus,Common,DS3231,GND,Black,
+GND,GND bus,Common,IR drop,GND,Black,FC-51 chute
+GND,GND bus,Common,IR pickup,GND,Black,FC-51 tray
+GND,GND bus,Common,Buzzer,GND,Black,5V active module
+GND,GND bus,Common,SIM800C,GND,Black,
+GND,GND bus,Common,INMP441,GND,Black,Optional voice
+GND,GND bus,Common,Divider R2,bottom,Black,Only if SIM TX level-shifted
+3V3,Pi,Pin 1 (3.3V),DS3231,VCC,Red,Module usually has 4.7k I2C pull-ups
 3V3,Pi,Pin 1 (3.3V),IR drop,VCC,Red,
 3V3,Pi,Pin 1 (3.3V),IR pickup,VCC,Red,
-3V3,Pi,Pin 1 (3.3V),Buzzer,VCC,Red,Active buzzer 3.3V module
-3V3,Pi,Pin 1 (3.3V),INMP441,VDD,Red,Optional
-3V3,Pi,Pin 1 (3.3V),INMP441,L/R,Black,Tie L/R to GND = left channel
-5V_SERVO,External PSU,+5V,Servo 0,VCC,Red,Do NOT use Pi 5V for 6 servos
+3V3,Pi,Pin 1 (3.3V),INMP441,VDD,Red,Optional; L/R also to GND
+5V_PI,Pi,Pin 2 or 4 (5V),Buzzer,VCC,Red,5V buzzer only — not servos/GSM
+5V_SERVO,External PSU,+5V,Servo 0,VCC,Red,Do NOT use Pi 5V for 6× MG996R
 5V_SERVO,External PSU,+5V,Servo 1,VCC,Red,
 5V_SERVO,External PSU,+5V,Servo 2,VCC,Red,
 5V_SERVO,External PSU,+5V,Servo 3,VCC,Red,
 5V_SERVO,External PSU,+5V,Servo 4,VCC,Red,
 5V_SERVO,External PSU,+5V,Servo 5,VCC,Red,
-SERVO0_SIG,Pi,GPIO12 (BCM),Servo 0,Signal (PWM),Orange,Compartment 0
-SERVO1_SIG,Pi,GPIO13 (BCM),Servo 1,Signal (PWM),Orange,Compartment 1
-SERVO2_SIG,Pi,GPIO16 (BCM),Servo 2,Signal (PWM),Orange,Compartment 2
-SERVO3_SIG,Pi,GPIO17 (BCM),Servo 3,Signal (PWM),Orange,Compartment 3
-SERVO4_SIG,Pi,GPIO26 (BCM),Servo 4,Signal (PWM),Orange,Compartment 4
-SERVO5_SIG,Pi,GPIO27 (BCM),Servo 5,Signal (PWM),Orange,Compartment 5
-IR_DROP,IR drop,OUT,Pi,GPIO23 (BCM),Yellow,LOW = pill detected
-IR_PICKUP,IR pickup,OUT,Pi,GPIO24 (BCM),Yellow,HIGH = pill picked up
-BUZZER,Pi,GPIO25 (BCM),Buzzer,Signal,Green,
-I2C_SDA,Pi,GPIO2 (SDA),DS3231,SDA,Blue,
-I2C_SCL,Pi,GPIO3 (SCL),DS3231,SCL,Purple,
-I2S_BCLK,Pi,GPIO18 (BCM),INMP441,SCK,Yellow,Optional voice
-I2S_LRCLK,Pi,GPIO19 (BCM),INMP441,WS,Yellow,Optional voice
-I2S_DATA,INMP441,SD,Pi,GPIO20 (BCM),Yellow,Optional voice
-CSI,Pi Camera,CSI flex,Pi,CSI port,—,Ribbon — not on breadboard
-USB_GSM,USB-TTL adapter,USB,Pi,USB port,—,Appears as /dev/ttyUSB0
-USB_GSM,USB-TTL,TX/RX,SIM800L,RX/TX,—,Cross: Pi-TTL TX→SIM RX
-3V7_GSM,LiPo 3.7V,+,SIM800L,VCC,Red,Up to 2A bursts — not from Pi
+5V_SERVO_CAP,External PSU,+5V,Cap 1000uF 16V,+,Red,Decoupling near servos
+5V_SERVO_CAP,GND bus,Common,Cap 1000uF 16V,−,Black,
+SERVO0_SIG,Pi,GPIO12 Pin32,R220_0,in,Orange,Optional series 220–470Ω
+SERVO0_SIG,R220_0,out,Servo 0,Signal,Orange,Compartment 0
+SERVO1_SIG,Pi,GPIO13 Pin33,R220_1,in,Orange,
+SERVO1_SIG,R220_1,out,Servo 1,Signal,Orange,Compartment 1
+SERVO2_SIG,Pi,GPIO16 Pin36,R220_2,in,Orange,
+SERVO2_SIG,R220_2,out,Servo 2,Signal,Orange,Compartment 2
+SERVO3_SIG,Pi,GPIO17 Pin11,R220_3,in,Orange,
+SERVO3_SIG,R220_3,out,Servo 3,Signal,Orange,Compartment 3
+SERVO4_SIG,Pi,GPIO26 Pin37,R220_4,in,Orange,
+SERVO4_SIG,R220_4,out,Servo 4,Signal,Orange,Compartment 4
+SERVO5_SIG,Pi,GPIO27 Pin13,R220_5,in,Orange,
+SERVO5_SIG,R220_5,out,Servo 5,Signal,Orange,Compartment 5
+IR_DROP,IR drop,OUT,Pi,GPIO23 Pin16,Yellow,LOW = pill in chute
+IR_PICKUP,IR pickup,OUT,Pi,GPIO24 Pin18,Yellow,HIGH = pill removed (per code)
+BUZZER,Pi,GPIO25 Pin22,Buzzer,Signal,Green,5V active module
+I2C_SDA,Pi,GPIO2 Pin3,DS3231,SDA,Blue,
+I2C_SCL,Pi,GPIO3 Pin5,DS3231,SCL,Purple,
+UART_TX,Pi,GPIO14 Pin8 TX,SIM800C,RX,Grey,Pi 3.3V TX → module RX
+UART_RX,SIM800C,TX,R1 10k,in,Grey,Skip divider if TX already ≤3.3V
+UART_RX,R1 10k,out,Pi,GPIO15 Pin10 RX,Grey,Tap to R2
+UART_RX,R1/R2 junction,—,R2 20k,top,Grey,
+UART_RX,R2 20k,bottom,GND bus,Common,Black,
+3V7_GSM,LiPo 3.7V,+,SIM800C,VCC,Red,Peak ~2A — not from Pi
+3V7_CAP,LiPo 3.7V,+,Cap 1000uF 10V,+,Red,If not onboard SIM module
+3V7_CAP,GND bus,Common,Cap 1000uF 10V,−,Black,
+CSI,Pi Camera,CSI flex,Pi,CSI/CAM port,—,Ribbon — not breadboard
+I2S_BCLK,Pi,GPIO18,INMP441,SCK,Yellow,Optional voice
+I2S_LRCLK,Pi,GPIO19,INMP441,WS,Yellow,Optional voice
+I2S_DATA,INMP441,SD,Pi,GPIO20,Yellow,Optional voice
+I2S_LR,INMP441,L/R,GND bus,Common,Black,Left channel select
