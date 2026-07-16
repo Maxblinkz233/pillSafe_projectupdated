@@ -1,6 +1,6 @@
 # PillSafe — Smart Pill Dispenser with Facial Recognition
 
-A Raspberry Pi 4B-based smart medication dispensing system that uses facial recognition (FaceNet embeddings), IR-confirmed dispensing, and GSM SMS alerts to ensure safe, verified, and logged medication delivery.
+A Raspberry Pi 5-based smart medication dispensing system that uses facial recognition (FaceNet embeddings), IR-confirmed dispensing, and GSM SMS alerts (SIM800C UART) to ensure safe, verified, and logged medication delivery.
 
 **KNUST — Department of Computer Engineering | BSc Final Year Project**
 **Authors:** Boison, Simeon A.A. | Donkor, Maxwell J.
@@ -24,11 +24,12 @@ pillsafe/
 │   └── decision.py                # Orchestrates detection → FaceNet recognition
 │
 ├── hardware/                      # Physical component interfaces
-│   ├── dispenser.py               # Per-compartment servo control (6 servos × 9 slots)
+│   ├── gpio_compat.py             # Pi 5 lgpio → RPi.GPIO → simulation
+│   ├── dispenser.py               # 6× MG996R servos × 9 slots (no gate)
 │   ├── ir_sensor.py               # FC-51 IR sensors (pill detect + pickup)
-│   ├── buzzer.py                  # Active buzzer for audio feedback
+│   ├── buzzer.py                  # 5V active buzzer for audio feedback
 │   ├── rtc.py                     # DS3231 RTC via I2C
-│   └── gsm.py                     # SIM800L SMS via USB-to-serial
+│   └── gsm.py                     # SIM800C SMS via Pi UART (/dev/serial0)
 │
 ├── scheduler/                     # Time-based dispensing triggers
 │   └── schedule_controller.py     # RTC polling + DispenseEvent generation
@@ -64,8 +65,7 @@ pillsafe/
 
 ## Hardware Wiring Guide
 
-> **Fritzing:** Step-by-step breadboard/schematic build instructions, BOM, and
-> netlist CSVs are in [`docs/FRITZING_GUIDE.md`](docs/FRITZING_GUIDE.md).
+> **BOM:** Parts list is in [`docs/bom.csv`](docs/bom.csv).
 
 ### GPIO Pin Assignment (BCM Numbering)
 
@@ -77,34 +77,35 @@ pillsafe/
 | Servo — compartment 3 | PWM    | GPIO 17    | Pin 11       |                             |
 | Servo — compartment 4 | PWM    | GPIO 26    | Pin 37       |                             |
 | Servo — compartment 5 | PWM    | GPIO 27    | Pin 13       |                             |
-| Servos              | VCC      | —          | 5V rail      | Servos need 5V (shared)     |
-| Servos              | GND      | —          | GND          | Common ground               |
+| Servos              | VCC      | —          | External 5V  | MG996R; ≥5–6 A; common GND  |
+| Servos              | GND      | —          | GND          | Common ground with Pi       |
 | FC-51 IR (pill det) | OUT      | GPIO 23    | Pin 16       | At discharge chute          |
 | FC-51 IR (pickup)   | OUT      | GPIO 24    | Pin 18       | At delivery tray            |
 | FC-51 IR sensors    | VCC      | —          | Pin 1 (3.3V) | Both sensors                |
 | FC-51 IR sensors    | GND      | —          | Pin 9        | Both sensors                |
-| Active Buzzer       | Signal   | GPIO 25    | Pin 22       |                             |
-| Active Buzzer       | VCC      | —          | Pin 17 (3.3V)|                             |
+| Active Buzzer (5V)  | Signal   | GPIO 25    | Pin 22       |                             |
+| Active Buzzer (5V)  | VCC      | —          | Pin 2/4 (5V) | Not 3.3V                    |
 | Active Buzzer       | GND      | —          | Pin 20       |                             |
 | DS3231 RTC          | SDA      | GPIO 2     | Pin 3        | I2C data (fixed)            |
 | DS3231 RTC          | SCL      | GPIO 3     | Pin 5        | I2C clock (fixed)           |
 | DS3231 RTC          | VCC      | —          | Pin 1 (3.3V) |                             |
 | DS3231 RTC          | GND      | —          | Pin 14       |                             |
-| Pi Camera v2        | CSI      | —          | CSI port     | Ribbon cable to CSI slot    |
-| SIM800L GSM         | TX/RX    | —          | USB port     | Via USB-to-serial adapter   |
-| SIM800L GSM         | VCC      | —          | —            | 3.7V LiPo (separate power) |
-| SIM800L GSM         | GND      | —          | Common GND   | Share ground with Pi        |
+| Pi Camera           | CSI      | —          | CSI port     | Ribbon to Pi 5 camera port  |
+| SIM800C GSM         | TX       | GPIO 15 RX | Pin 10       | 3.3V TTL UART               |
+| SIM800C GSM         | RX       | GPIO 14 TX | Pin 8        | 3.3V TTL UART               |
+| SIM800C GSM         | VCC      | —          | —            | 3.7–4.2V LiPo (separate)    |
+| SIM800C GSM         | GND      | —          | Common GND   | Share ground with Pi        |
 
 ### Wiring Diagram (Text)
 
 ```
-Raspberry Pi 4B GPIO Header (40-pin) — signal pins in BCM numbering
+Raspberry Pi 5 GPIO Header (40-pin) — signal pins in BCM numbering
 ══════════════════════════════════════════════════════════════════
  Power / Ground
-   Pin 1  (3.3V) ─── IR VCC, RTC VCC, Buzzer VCC, I2S mic VDD
-   Pin 2/4 (5V)  ─── Servo VCC ×6  (better: external 5V supply, see note)
-   Pin 6/9/14/20/25/30/34/39 (GND) ─── common ground for ALL modules
- Servos (one rotating cylinder per compartment)
+   Pin 1  (3.3V) ─── IR VCC, RTC VCC
+   Pin 2/4 (5V)  ─── Buzzer VCC (5V module); servos use EXTERNAL 5V ≥5–6 A
+   Pin 6/9/14/20/25/30/34/39 (GND) ─── common ground for ALL modules + servo PSU
+ Servos (MG996R 360° — one rotating cylinder per compartment)
    GPIO12 (Pin 32) ─── Compartment 0 servo signal
    GPIO13 (Pin 33) ─── Compartment 1 servo signal
    GPIO16 (Pin 36) ─── Compartment 2 servo signal
@@ -114,35 +115,35 @@ Raspberry Pi 4B GPIO Header (40-pin) — signal pins in BCM numbering
  Sensors / feedback
    GPIO23 (Pin 16) ─── IR sensor 1 OUT (discharge chute — drop confirm)
    GPIO24 (Pin 18) ─── IR sensor 2 OUT (delivery base — pickup confirm)
-   GPIO25 (Pin 22) ─── Buzzer signal
+   GPIO25 (Pin 22) ─── Buzzer signal (5V module)
  I2C — DS3231 RTC
    GPIO2  (Pin 3, SDA) ─── DS3231 SDA
    GPIO3  (Pin 5, SCL) ─── DS3231 SCL
- Voice mic — INMP441 I2S (optional; only if voice.enabled)
-   GPIO18 (Pin 12, BCLK) ─── mic SCK
-   GPIO19 (Pin 35, LRCLK)─── mic WS
-   GPIO20 (Pin 38, DIN)  ─── mic SD     (mic L/R → GND = left channel)
- Camera / GSM
-   CSI port ─── Pi Camera v2 ribbon cable
-   USB port ─── USB-to-Serial adapter → SIM800L TX/RX
+ UART — SIM800C (3.3V TTL; Serial Console disabled in raspi-config)
+   GPIO14 (Pin 8,  TXD0) ─── SIM800C RX
+   GPIO15 (Pin 10, RXD0) ─── SIM800C TX
+ Voice mic — INMP441 I2S (deferred; leave voice.enabled: false)
+ Camera
+   CSI port ─── Pi Camera ribbon cable
 ══════════════════════════════════════════════════════════════════
- SIM800L: powered by a separate 3.7V LiPo; share GND with the Pi.
- POWER NOTE: six servos can exceed the Pi's onboard 5V current limit.
- Drive the servos from an external 5V supply and tie that supply's
- GND to a Pi GND pin (common ground) — do NOT power 6 servos from the Pi.
+ SIM800C: powered by a separate 3.7–4.2V LiPo; share GND with the Pi.
+ POWER NOTE: six MG996R servos need an external 5V ≥5–6 A supply.
+ Tie that supply's GND to a Pi GND — do NOT power 6 servos from the Pi.
 ```
 
 ### Important Notes
 
-1. **SIM800L Power**: Must be powered by a separate 3.7V LiPo battery (NOT from the Pi's 3.3V or 5V rail). The SIM800L draws up to 2A during transmission bursts.
-2. **Common Ground**: The SIM800L's GND must be connected to the Pi's GND for serial communication to work.
-3. **I2C Setup**: Enable I2C on the Pi via `sudo raspi-config → Interface Options → I2C → Enable`. Verify with `sudo i2cdetect -y 1`.
-4. **Camera**: Enable via `sudo raspi-config → Interface Options → Camera → Enable`.
-5. **IR Sensor Orientation**: Mount the FC-51 at the discharge chute pointing into the pill path, and the second at the delivery tray opening.
+1. **SIM800C Power**: Separate 3.7–4.2V LiPo (NOT from Pi rails). Peak TX can approach 2 A.
+2. **Common Ground**: SIM800C GND must share ground with the Pi for UART.
+3. **Serial Port**: Enable hardware serial, disable login shell. Device: `/dev/serial0`.
+4. **I2C Setup**: `sudo raspi-config → Interface Options → I2C → Enable`. Verify with `sudo i2cdetect -y 1`.
+5. **Camera**: Enable via `sudo raspi-config → Interface Options → Camera → Enable`.
+6. **IR Sensor Orientation**: Mount FC-51 at discharge chute and delivery tray.
+7. **Voice**: Leave `voice.enabled: false` until INMP441 is fitted. KY-037 is not suitable for MFCC.
 
 ---
 
-## Raspberry Pi 4B — Step-by-Step Deployment
+## Raspberry Pi 5 — Step-by-Step Deployment
 
 Follow these steps in order once you have the hardware. Commands assume
 Raspberry Pi OS **Bookworm 64-bit** and the default username `pi`. If your
@@ -150,11 +151,11 @@ username is different, substitute it everywhere (and in
 `services/pillsafe.service`). The guide installs into `/home/pi/pillsafe`.
 
 ### What you need
-- Raspberry Pi 4B + quality USB-C power supply + microSD card (16 GB+)
-- Pi Camera v2 (CSI ribbon), DS3231 RTC (+ CR2032 backup cell), active buzzer
-- 2× FC-51 IR sensors, 6× 360°/continuous-rotation servos + **external 5V supply**
-- SIM800L GSM + USB-to-serial adapter + 3.7V LiPo (with a live SIM)
-- (Optional, for voice) INMP441 I2S microphone
+- Raspberry Pi 5 + official 27W USB-C PD supply + microSD card (32 GB+)
+- Pi Camera (CSI), DS3231 RTC (+ CR2032), 5V active buzzer
+- 2× FC-51 IR sensors, 6× MG996R 360° servos + **external 5V ≥5–6 A** supply
+- SIM800C GSM on Pi UART (`/dev/serial0`) + 3.7–4.2V LiPo (3.3V TTL)
+- (Deferred) INMP441 — keep `voice.enabled: false` until fitted
 - Jumper wires / breadboard or a wiring harness
 
 ### Step 1 — Flash Raspberry Pi OS
@@ -226,7 +227,7 @@ Wire everything per the **Hardware Wiring Guide** above (mind the servo power
 note). Then verify:
 ```bash
 i2cdetect -y 1          # DS3231 should appear at address 0x68
-ls /dev/ttyUSB*         # the SIM800L USB-serial adapter, e.g. /dev/ttyUSB0
+ls -l /dev/serial0     # SIM800C UART (serial HW on, console off)
 libcamera-hello -t 2000 # camera preview (or 'rpicam-hello' on newer OS)
 arecord -l              # (voice only) the INMP441 should be listed
 ```
@@ -235,10 +236,10 @@ arecord -l              # (voice only) the INMP441 should be listed
 Edit `config.yaml` and set at minimum:
 - `api.token` — replace `CHANGE_ME_ON_FIRST_SETUP` with a strong token (or export
   `PILLSAFE_API_TOKEN` instead; it overrides the file).
-- `alerts.serial_port` — match Step 8 (e.g. `/dev/ttyUSB0`).
-- `servo.pins` — confirm they match how you wired the six servos.
+- `alerts.serial_port` — `/dev/serial0` for SIM800C UART.
+- `servo.pins` — confirm they match how you wired the six MG996R servos.
 - `hotspot.ssid` / `hotspot.password` — your access-point name and WPA2 passphrase.
-- `voice.enabled` (+ `voice.device_index` from `arecord -l`) if using voice.
+- leave `voice.enabled: false` until INMP441 is fitted.
 
 ### Step 10 — Set the DS3231 RTC time
 With the system clock correct (Step 2), write it into the RTC once:
@@ -315,9 +316,9 @@ python3 scripts/dry_run_demo.py --base-url http://192.168.4.1:5000 --token YOUR_
 | RTC not found | `i2cdetect -y 1` shows nothing at 0x68 → re-check SDA/SCL/power; is I2C enabled? |
 | "TFLite model not loaded" | Run Step 7; confirm `data/models/mobilefacenet.tflite` exists |
 | Camera errors | `libcamera-hello`; ensure the CSI ribbon is seated and Camera is enabled |
-| No SMS sent | `ls /dev/ttyUSB*` matches `alerts.serial_port`; SIM800L has its own 3.7V power + shared GND + signal |
-| Servos jitter / brown-out | Use the external 5V supply (not the Pi) for the servos; share GND |
-| Voice disabled at start | Install `sounddevice`/`librosa`, check `arecord -l`, set `voice.device_index` |
+| No SMS sent | `ls -l /dev/serial0` matches `alerts.serial_port`; SIM800C LiPo + shared GND + 3.3V UART |
+| Servos jitter / brown-out | External 5V ≥5–6 A for MG996R; share GND; raise `servo.hold_time` if needed |
+| Voice disabled at start | Expected while `voice.enabled: false`; else install sounddevice/librosa + INMP441 |
 | Service won't start | `journalctl -u pillsafe -e`; verify `User=`/paths in the unit file |
 | API returns 401 | Send `Authorization: Bearer <token>` matching `api.token` / `PILLSAFE_API_TOKEN` |
 
