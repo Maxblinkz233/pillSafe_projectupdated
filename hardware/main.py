@@ -535,11 +535,11 @@ class PillSafeSystem:
         self.rtc.cleanup()
         self.gsm.cleanup()
 
-        # Final GPIO cleanup
+        # Final GPIO cleanup (lgpio chip or RPi.GPIO)
         try:
-            import RPi.GPIO as GPIO
-            GPIO.cleanup()
-        except (ImportError, RuntimeError):
+            from hardware import gpio_compat as gpio
+            gpio.close_chip()
+        except Exception:
             pass
 
         logger.info("PillSafe shut down complete")

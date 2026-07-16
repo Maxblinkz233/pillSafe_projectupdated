@@ -16,12 +16,13 @@ tflite-runtime>=2.14.0; platform_machine == "aarch64"   # Pi 4/5 (ARM64)
 # Camera (Raspberry Pi — pre-installed on Pi OS)
 # picamera2  # Already available on Raspberry Pi OS
 
-# Hardware interfaces
-#RPi.GPIO>=0.7.1                   # GPIO control for servo, buzzer, IR sensors
+# Hardware interfaces (Raspberry Pi 5 preferred)
+lgpio>=0.2.2.0                    # Pi 5 GPIO (Bookworm); gpio_compat falls back to RPi.GPIO
+# RPi.GPIO>=0.7.1                 # Optional fallback for Pi 4 / older images
 smbus2>=0.4.3                     # I2C communication with DS3231 RTC
 
 # Serial communication
-pyserial>=3.5                     # UART control of SIM800L GSM module
+pyserial>=3.5                     # UART control of SIM800C GSM module (/dev/serial0)
 
 # Web framework
 Flask>=3.0.0                      # REST API server
@@ -29,7 +30,7 @@ Flask>=3.0.0                      # REST API server
 # Configuration
 PyYAML>=6.0                       # config.yaml loader
 
-# Voice authentication (optional — the system degrades gracefully if missing)
+# Voice authentication (optional — leave voice.enabled: false until INMP441 works)
 # Required by core/voice_recogniser.py for I2S mic capture + MFCC features.
 sounddevice>=0.4.6               # Audio capture from the I2S/INMP441 microphone
 librosa>=0.10.0                  # MFCC feature extraction for speaker verification

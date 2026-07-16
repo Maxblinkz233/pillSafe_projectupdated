@@ -1,7 +1,16 @@
 """
-PillSafe — GSM SMS Module (SIM800L via USB-to-serial)
-Connection: USB-to-Serial adapter → Pi USB port (/dev/ttyUSB0)
-SIM800L VCC → 3.7V LiPo (separate power), GND → shared with Pi.
+PillSafe — GSM SMS Module (SIM800C via Pi UART)
+==============================================
+Connection (3.3V TTL — do NOT use 5V TTL adaptors):
+  SIM800C TX  → Pi GPIO 15 (RXD0 / Pin 10)
+  SIM800C RX  → Pi GPIO 14 (TXD0 / Pin 8)
+  SIM800C GND → Pi GND (shared)
+  SIM800C VCC → 3.7–4.2V LiPo (separate supply; never from Pi 5V alone)
+
+Enable the serial port in raspi-config (disable login shell on serial),
+then use /dev/serial0 (symlink to the PL011 UART on Pi 5).
+
+AT SMS behaviour is identical to SIM800L.
 """
 
 import time
@@ -34,7 +43,9 @@ class GSMModule:
             logger.info("GSM simulated on %s", self.port)
             return
         try:
-            self._serial = serial.Serial(self.port, self.baud_rate, timeout=self.timeout)
+            self._serial = serial.Serial(
+                self.port, self.baud_rate, timeout=self.timeout
+            )
             time.sleep(2)
             self._initialised = self._check_module()
         except serial.SerialException as e:
@@ -50,7 +61,9 @@ class GSMModule:
         end_time = time.time() + (timeout or self.timeout)
         while time.time() < end_time:
             if self._serial.in_waiting:
-                response += self._serial.read(self._serial.in_waiting).decode(errors="ignore")
+                response += self._serial.read(
+                    self._serial.in_waiting
+                ).decode(errors="ignore")
                 if expected in response or "ERROR" in response:
                     break
             time.sleep(0.1)
@@ -60,7 +73,7 @@ class GSMModule:
         ok, _ = self._send_at("AT")
         if ok:
             self._send_at("AT+CMGF=1")
-            logger.info("SIM800L responsive")
+            logger.info("SIM800C responsive on %s", self.port)
         return ok
 
     def send_sms(self, phone_number: str, message: str) -> bool:
@@ -80,7 +93,9 @@ class GSMModule:
         end_time = time.time() + self.timeout
         while time.time() < end_time:
             if self._serial.in_waiting:
-                response += self._serial.read(self._serial.in_waiting).decode(errors="ignore")
+                response += self._serial.read(
+                    self._serial.in_waiting
+                ).decode(errors="ignore")
                 if "+CMGS" in response:
                     return True
                 if "ERROR" in response:

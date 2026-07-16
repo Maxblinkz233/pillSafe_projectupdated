@@ -42,10 +42,10 @@ servo:
   # Avoids pins used by I2C RTC (2,3), IR sensors (23,24), buzzer (25),
   # and the I2S mic (18,19,20).
   pins: [12, 13, 16, 17, 26, 27]
-  max_angle: 360                     # full rotation: 9 slots × 40°
-  min_duty: 2.5                      # duty cycle at 0°
-  max_duty: 12.5                     # duty cycle at max_angle
-  hold_time: 0.5                     # seconds to hold before releasing the signal
+  max_angle: 360                     # full rotation: 9 slots × 40° (MG996R 360°)
+  min_duty: 2.5                      # duty cycle at 0° — calibrate per servo
+  max_duty: 12.5                     # duty cycle at max_angle — calibrate per servo
+  hold_time: 0.8                     # seconds to hold before releasing (MG996R)
 
 # --- IR Sensors ---
 ir_sensors:
@@ -61,9 +61,12 @@ buzzer:
   failure_pattern: [0.1, 0.1, 0.1, 0.1, 0.1]
   missed_pattern: [1.0, 0.5, 1.0]
 
-# --- GSM / SMS Alerts ---
+# --- GSM / SMS Alerts (SIM800C on Pi UART) ---
+# Enable serial in raspi-config (Serial Port ON, Serial Console OFF).
+# Wiring (3.3V TTL): SIM800C TX→GPIO15(RX), RX→GPIO14(TX), GND shared.
+# Power SIM800C from a separate 3.7–4.2V LiPo — not from the Pi 5V rail alone.
 alerts:
-  serial_port: "/dev/ttyUSB0"
+  serial_port: "/dev/serial0"
   baud_rate: 9600
   max_sms_per_event: 2
   retry_interval_minutes: 60
@@ -104,9 +107,9 @@ hotspot:
   dhcp_range_end: "192.168.4.50"
   dhcp_lease_time: "24h"
 
-# ── Voice Recognition (additions to config.yaml) ──────────────────────────
+# ── Voice Recognition (deferred until INMP441 is fitted) ───────────────────
 voice:
-  enabled: true                   # set false to disable voice auth entirely
+  enabled: false                  # set true only after INMP441 + sounddevice/librosa work
   sample_rate: 16000              # Hz — INMP441 native sample rate
   record_duration_sec: 3          # seconds recorded per utterance
   n_mfcc: 40                      # MFCC coefficient count
@@ -119,8 +122,8 @@ voice:
 # ── Hardware additions ─────────────────────────────────────────────────────
 hardware:
   i2s_mic:
-    enabled: true
-    # INMP441 wiring (BCM numbering):
+    enabled: false                # match voice.enabled until the mic is installed
+    # INMP441 wiring (BCM numbering) — unused while enabled: false:
     #   SCK  → GPIO 18   (I2S bit clock)
     #   WS   → GPIO 19   (I2S word select / LRCLK)
     #   SD   → GPIO 20   (I2S data in)

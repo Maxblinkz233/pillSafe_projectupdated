@@ -13,15 +13,9 @@ FC-51 behaviour: LOW = obstacle detected, HIGH = clear.
 import time
 from utils.config import get_config
 from utils.logger import setup_logger
+from hardware import gpio_compat as gpio
 
 logger = setup_logger("pillsafe.ir_sensor")
-
-try:
-    import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
-except (ImportError, RuntimeError):
-    GPIO_AVAILABLE = False
-    logger.warning("RPi.GPIO not available — IR sensors in simulation mode")
 
 
 class IRSensorManager:
@@ -32,25 +26,28 @@ class IRSensorManager:
         self._setup_gpio()
 
     def _setup_gpio(self):
-        if not GPIO_AVAILABLE:
-            logger.info("IR sensors simulated on GPIO %d, %d",
-                         self.pill_detect_pin, self.pill_pickup_pin)
+        if not gpio.AVAILABLE:
+            logger.info(
+                "IR sensors simulated on GPIO %d, %d (%s)",
+                self.pill_detect_pin, self.pill_pickup_pin, gpio.BACKEND,
+            )
             return
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pill_detect_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(self.pill_pickup_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        logger.info("IR sensors on GPIO %d (detect), %d (pickup)",
-                     self.pill_detect_pin, self.pill_pickup_pin)
+        gpio.setup_in(self.pill_detect_pin, pull_up=True)
+        gpio.setup_in(self.pill_pickup_pin, pull_up=True)
+        logger.info(
+            "IR sensors on GPIO %d (detect), %d (pickup) [%s]",
+            self.pill_detect_pin, self.pill_pickup_pin, gpio.BACKEND,
+        )
 
     def pill_detected(self) -> bool:
-        if not GPIO_AVAILABLE:
+        if not gpio.AVAILABLE:
             return True
-        return GPIO.input(self.pill_detect_pin) == GPIO.LOW
+        return gpio.input(self.pill_detect_pin) == gpio.LOW
 
     def pill_picked_up(self) -> bool:
-        if not GPIO_AVAILABLE:
+        if not gpio.AVAILABLE:
             return True
-        return GPIO.input(self.pill_pickup_pin) == GPIO.HIGH
+        return gpio.input(self.pill_pickup_pin) == gpio.HIGH
 
     def wait_for_pill_drop(self, timeout: float = 5.0) -> bool:
         start = time.time()
@@ -76,5 +73,4 @@ class IRSensorManager:
         return False
 
     def cleanup(self):
-        if GPIO_AVAILABLE:
-            GPIO.cleanup([self.pill_detect_pin, self.pill_pickup_pin])
+        gpio.cleanup([self.pill_detect_pin, self.pill_pickup_pin])

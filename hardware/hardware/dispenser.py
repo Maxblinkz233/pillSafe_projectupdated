@@ -2,35 +2,26 @@
 PillSafe — Dispensing Mechanism Controller
 Each of the six compartments (one per patient) is a rotating cylinder with
 nine angular slots (~40° apart). Every compartment is driven by its own
-servo. Dispensing is rotation-only: the compartment's servo rotates so the
-target slot aligns with that compartment's fixed drop hole, and the pill
-falls by gravity down a delivery tube to the collection base. There is no
-gate — the IR sensors (see hardware/ir_sensor.py) confirm the drop and the
-pickup.
+MG996R (continuous-rotation / 360° capable) servo.
+
+Dispensing is rotation-only: the compartment's servo rotates so the target
+slot aligns with that compartment's fixed drop hole, and the pill falls by
+gravity to the collection base. There is no gate.
 
 GPIO Wiring (BCM numbering, one signal pin per compartment):
   - Compartment 0..5 servo signals → config servo.pins (default 12,13,16,17,26,27)
-  - Each servo VCC → 5V, GND → common GND with the Pi
+  - Each servo VCC → external 5V supply (≥5–6 A recommended for 6× MG996R)
+  - Each servo GND → common GND with the Pi (and the external PSU)
 
-Note on motor type:
-  The mechanism assumes 360°-capable positional servos so all nine slots
-  (9 × 40° = 360°) are reachable. Angle→duty is a linear positional map; for
-  true continuous-rotation servos this approximates position and may need
-  per-unit calibration of min_duty/max_duty/max_angle in config.yaml.
+Calibrate min_duty / max_duty / hold_time in config.yaml per servo unit.
 """
 
 import time
 from utils.config import get_config
 from utils.logger import setup_logger
+from hardware import gpio_compat as gpio
 
 logger = setup_logger("pillsafe.dispenser")
-
-try:
-    import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
-except (ImportError, RuntimeError):
-    GPIO_AVAILABLE = False
-    logger.warning("RPi.GPIO not available — dispenser in simulation mode")
 
 
 class Dispenser:
@@ -46,8 +37,6 @@ class Dispenser:
         self.hold_time = cfg.servo.hold_time
         self.max_angle = float(getattr(cfg.servo, "max_angle", 360.0))
 
-        # One signal pin per compartment (BCM). Fall back to a single legacy
-        # pwm_pin for compartment 0 if a pins list isn't configured.
         pins = getattr(cfg.servo, "pins", None)
         if not pins:
             legacy = getattr(cfg.servo, "pwm_pin", 18)
@@ -60,24 +49,27 @@ class Dispenser:
                 len(self.pins), self.num_compartments,
             )
 
-        # Nine slots across the full rotation → 40° per slot by default
         self.angle_per_slot = self.max_angle / self.num_slots
-
-        self._pwms: dict[int, "GPIO.PWM"] = {}
+        self._pwms: dict[int, gpio.PWM] = {}
         self._current_slot: dict[int, int] = {}
         self._setup_gpio()
 
     def _setup_gpio(self) -> None:
-        if not GPIO_AVAILABLE:
-            logger.info("Dispenser GPIO simulated — pins %s", self.pins)
+        if not gpio.AVAILABLE:
+            logger.info(
+                "Dispenser GPIO simulated (%s) — pins %s",
+                gpio.BACKEND, self.pins,
+            )
             return
-        GPIO.setmode(GPIO.BCM)
         for compartment, pin in enumerate(self.pins):
-            GPIO.setup(pin, GPIO.OUT)
-            pwm = GPIO.PWM(pin, self.frequency)
+            gpio.setup_out(pin)
+            pwm = gpio.PWM(pin, self.frequency)
             pwm.start(0)
             self._pwms[compartment] = pwm
-        logger.info("Servos on GPIO %s at %d Hz", self.pins, self.frequency)
+        logger.info(
+            "MG996R servos on GPIO %s at %d Hz [%s]",
+            self.pins, self.frequency, gpio.BACKEND,
+        )
 
     def _slot_angle(self, slot_index: int) -> float:
         return round(slot_index * self.angle_per_slot, 1)
@@ -110,7 +102,7 @@ class Dispenser:
         logger.info("Compartment %d → slot %d (%.1f°, duty %.2f%%)",
                     compartment_index, slot_index, target_angle, duty)
 
-        if GPIO_AVAILABLE:
+        if gpio.AVAILABLE:
             pwm = self._pwms.get(compartment_index)
             if pwm is None:
                 logger.error("No servo configured for compartment %d", compartment_index)
@@ -138,10 +130,11 @@ class Dispenser:
         return self._current_slot.get(compartment_index)
 
     def cleanup(self) -> None:
-        if GPIO_AVAILABLE:
-            for pwm in self._pwms.values():
-                try:
-                    pwm.stop()
-                except Exception:
-                    pass
-            logger.info("Servo PWM stopped")
+        for pwm in self._pwms.values():
+            try:
+                pwm.stop()
+            except Exception:
+                pass
+        if self.pins:
+            gpio.cleanup(self.pins)
+        logger.info("Servo PWM stopped")
