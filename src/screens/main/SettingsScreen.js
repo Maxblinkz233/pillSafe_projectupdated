@@ -22,14 +22,15 @@ import {
   Info,
   LogOut,
   ChevronRight,
+  Trash2,
+  Mic,
 } from 'lucide-react-native';
 import {useFocusEffect} from '@react-navigation/native';
-import {getApiConfig} from '../../services/config';
+import {getApiConfig, signOutLocal} from '../../services/config';
 import {initials} from '../../services/api';
 
-const SettingsScreen = ({ navigation }) => {
+const SettingsScreen = ({navigation}) => {
   const [userName, setUserName] = useState('Patient');
-  const [avatarLetter, setAvatarLetter] = useState('P');
 
   useFocusEffect(
     useCallback(() => {
@@ -37,9 +38,7 @@ const SettingsScreen = ({ navigation }) => {
       (async () => {
         const cfg = await getApiConfig();
         if (!active) return;
-        const name = cfg.userName || 'Patient';
-        setUserName(name);
-        setAvatarLetter(initials(name));
+        setUserName(cfg.userName || 'Patient');
       })();
       return () => {
         active = false;
@@ -47,12 +46,18 @@ const SettingsScreen = ({ navigation }) => {
     }, []),
   );
 
-  const handleLogout = () => navigation.replace('Login');
+  const handleLogout = async () => {
+    await signOutLocal();
+    navigation.replace('Login');
+  };
 
-  const SettingsItem = ({ icon, label, onPress }) => (
+  const SettingsItem = ({icon, label, onPress}) => (
     <TouchableOpacity
       style={styles.settingsItem}
-      onPress={onPress || (() => navigation.navigate('SettingsDetail', { title: label }))}>
+      onPress={
+        onPress ||
+        (() => navigation.navigate('SettingsDetail', {title: label}))
+      }>
       <View style={styles.settingsIconContainer}>{icon}</View>
       <Text style={styles.settingsLabel}>{label}</Text>
       <ChevronRight size={18} color="#9CA3AF" />
@@ -63,42 +68,37 @@ const SettingsScreen = ({ navigation }) => {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
-      {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{avatarLetter}</Text>
-          </View>
-          <View>
-            <Text style={styles.patientLabel}>PATIENT</Text>
-            <Text style={styles.userName}>{userName}</Text>
-          </View>
+        <View style={styles.logoBadge}>
+          <Text style={styles.logoTextPill}>Pill</Text>
+          <Text style={styles.logoTextSafe}>Safe</Text>
         </View>
         <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
           <Bell size={24} color="#374151" />
         </TouchableOpacity>
       </View>
 
-      {/* Profile Card */}
-      <View style={styles.profileCard}>
+      <TouchableOpacity
+        style={styles.profileCard}
+        onPress={() => navigation.navigate('Profile')}>
         <View style={styles.profileAvatar}>
-          <Text style={styles.profileAvatarText}>{avatarLetter}</Text>
+          <Text style={styles.profileAvatarText}>{initials(userName)}</Text>
         </View>
         <View style={styles.profileInfo}>
           <Text style={styles.profileName}>{userName}</Text>
-          <TouchableOpacity style={styles.viewProfileRow}>
+          <View style={styles.viewProfileRow}>
             <Text style={styles.viewProfileText}>View Profile</Text>
             <ChevronRight size={14} color="#3B5BDB" />
-          </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </TouchableOpacity>
 
-      {/* Account Section */}
       <Text style={styles.sectionLabel}>ACCOUNT</Text>
       <View style={styles.sectionCard}>
         <SettingsItem
           icon={<Shield size={20} color="#3B5BDB" />}
-          label="Security"
+          label="Profile"
+          onPress={() => navigation.navigate('Profile')}
         />
         <View style={styles.divider} />
         <SettingsItem
@@ -109,10 +109,16 @@ const SettingsScreen = ({ navigation }) => {
         <SettingsItem
           icon={<Smartphone size={20} color="#3B5BDB" />}
           label="Linked Devices"
+          onPress={() => navigation.navigate('DeviceConnection')}
+        />
+        <View style={styles.divider} />
+        <SettingsItem
+          icon={<Trash2 size={20} color="#991B1B" />}
+          label="Delete Account"
+          onPress={() => navigation.navigate('Profile')}
         />
       </View>
 
-      {/* Notifications Section */}
       <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
       <View style={styles.sectionCard}>
         <SettingsItem
@@ -131,7 +137,6 @@ const SettingsScreen = ({ navigation }) => {
         />
       </View>
 
-      {/* Dispenser Section */}
       <Text style={styles.sectionLabel}>DISPENSER</Text>
       <View style={styles.sectionCard}>
         <SettingsItem
@@ -146,18 +151,18 @@ const SettingsScreen = ({ navigation }) => {
         />
         <View style={styles.divider} />
         <SettingsItem
-          icon={<Wifi size={20} color="#3B5BDB" />}
-          label="Device Connection"
-          onPress={() => navigation.navigate('DeviceConnection')}
+          icon={<Mic size={20} color="#3B5BDB" />}
+          label="Voice Enrolment"
+          onPress={() => navigation.navigate('VoiceEnroll')}
         />
         <View style={styles.divider} />
         <SettingsItem
           icon={<Wifi size={20} color="#3B5BDB" />}
-          label="Wi-Fi Setup"
+          label="Device Connection"
+          onPress={() => navigation.navigate('DeviceConnection')}
         />
       </View>
 
-      {/* Support Section */}
       <Text style={styles.sectionLabel}>SUPPORT</Text>
       <View style={styles.sectionCard}>
         <SettingsItem
@@ -176,13 +181,12 @@ const SettingsScreen = ({ navigation }) => {
         />
       </View>
 
-      {/* Logout */}
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <LogOut size={20} color="#991B1B" />
-        <Text style={styles.logoutText}>Logout</Text>
+        <Text style={styles.logoutText}>Sign out</Text>
       </TouchableOpacity>
 
-      <View style={{ height: 30 }} />
+      <View style={{height: 30}} />
     </ScrollView>
   );
 };
@@ -200,34 +204,15 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     marginBottom: 16,
   },
-  headerLeft: {
+  logoBadge: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
     backgroundColor: '#3B5BDB',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  patientLabel: {
-    fontSize: 11,
-    color: '#6B7280',
-    letterSpacing: 1,
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#3B5BDB',
-  },
+  logoTextPill: {fontSize: 16, fontWeight: 'bold', color: '#FFFFFF'},
+  logoTextSafe: {fontSize: 16, fontWeight: 'bold', color: '#A5F3FC'},
   profileCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -239,7 +224,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#3B5BDB',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -257,9 +242,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
   },
-  profileInfo: {
-    flex: 1,
-  },
+  profileInfo: {flex: 1},
   profileName: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -288,7 +271,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, {useEffect} from 'react';
 import {
   View,
   Text,
@@ -6,13 +6,30 @@ import {
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
+import {getApiConfig} from '../../services/config';
 
-const SplashScreen = ({ navigation }) => {
+const SplashScreen = ({navigation}) => {
   useEffect(() => {
-    const timer = setTimeout(() => {
-      navigation.replace('Login');
-    }, 3000);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const cfg = await getApiConfig();
+        if (cancelled) return;
+        if (cfg.signedIn && cfg.userId) {
+          navigation.replace('MainApp');
+        } else if (cfg.signedIn) {
+          navigation.replace('DeviceConnection', {afterLogin: true});
+        } else {
+          navigation.replace('Login');
+        }
+      } catch {
+        if (!cancelled) navigation.replace('Login');
+      }
+    }, 1800);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [navigation]);
 
   return (
@@ -29,7 +46,7 @@ const SplashScreen = ({ navigation }) => {
 
       <View style={styles.bottomContainer}>
         <ActivityIndicator size="small" color="#3B5BDB" />
-        <Text style={styles.syncText}>SYNCHRONIZING SECURELY</Text>
+        <Text style={styles.syncText}>STARTING</Text>
       </View>
     </View>
   );

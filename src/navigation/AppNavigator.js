@@ -7,6 +7,7 @@ import { Home, Calendar, ScanFace, BarChart2, Settings } from 'lucide-react-nati
 import VoiceVerifyScreen from '../screens/main/VoiceVerifyScreen';
 import SettingsDetailScreen from '../screens/main/SettingsDetailScreen';
 import DeviceConnectionScreen from '../screens/main/DeviceConnectionScreen';
+import ProfileScreen from '../screens/main/ProfileScreen';
 
 // Auth Screens
 import SplashScreen from '../screens/auth/SplashScreen';
@@ -108,6 +109,7 @@ const AppNavigator = () => {
         <Stack.Screen name="DeviceConnection" component={DeviceConnectionScreen} />
         <Stack.Screen name="AddMedication" component={AddMedicationScreen} />
         <Stack.Screen name="VoiceEnroll" component={VoiceEnrollScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

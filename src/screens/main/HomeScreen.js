@@ -120,7 +120,9 @@ const HomeScreen = ({navigation}) => {
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
+        <TouchableOpacity
+          style={styles.headerLeft}
+          onPress={() => navigation.navigate('Profile')}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials(userName)}</Text>
           </View>
@@ -128,7 +130,7 @@ const HomeScreen = ({navigation}) => {
             <Text style={styles.greeting}>{greetingForNow()}</Text>
             <Text style={styles.userName}>{userName}</Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.bellContainer}
           onPress={() => navigation.navigate('Alerts')}>
@@ -222,7 +224,13 @@ const HomeScreen = ({navigation}) => {
                 </Text>
                 <Text style={styles.nextDispenseSub}>
                   {nextDose
-                    ? `${nextDose.dosage || 'Dose'} • ${nextDose.slot}`
+                    ? `${nextDose.dosage || 'Dose'} • ${nextDose.slot} • ${
+                        nextDose.status === 'missed'
+                          ? 'Missed — verify late'
+                          : nextDose.status === 'due'
+                            ? 'Due now'
+                            : 'Upcoming'
+                      }`
                     : 'All caught up for today'}
                 </Text>
               </View>
@@ -258,6 +266,8 @@ const HomeScreen = ({navigation}) => {
                         backgroundColor:
                           med.status === 'taken'
                             ? '#10B981'
+                            : med.status === 'due'
+                            ? '#F59E0B'
                             : med.status === 'pending'
                             ? '#3B5BDB'
                             : '#EF4444',
@@ -267,6 +277,8 @@ const HomeScreen = ({navigation}) => {
                   <View style={styles.medIconContainer}>
                     {med.status === 'taken' ? (
                       <CheckCircle size={22} color="#10B981" />
+                    ) : med.status === 'due' ? (
+                      <Timer size={22} color="#F59E0B" />
                     ) : med.status === 'pending' ? (
                       <Timer size={22} color="#3B5BDB" />
                     ) : (
@@ -286,6 +298,8 @@ const HomeScreen = ({navigation}) => {
                         color:
                           med.status === 'taken'
                             ? '#10B981'
+                            : med.status === 'due'
+                            ? '#F59E0B'
                             : med.status === 'pending'
                             ? '#3B5BDB'
                             : '#EF4444',
@@ -293,6 +307,8 @@ const HomeScreen = ({navigation}) => {
                     ]}>
                     {med.status === 'taken'
                       ? `Taken ${med.takenAt || ''}`.trim()
+                      : med.status === 'due'
+                      ? `Due now ${med.time}`
                       : med.status === 'pending'
                       ? `Pending ${med.time}`
                       : `Missed ${med.time}`}

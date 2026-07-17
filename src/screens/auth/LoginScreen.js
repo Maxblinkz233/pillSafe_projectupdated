@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
@@ -9,49 +10,42 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import {Wifi, Users} from 'lucide-react-native';
-import {getApiConfig} from '../../services/config';
-import {api} from '../../services/api';
+import {User, Phone} from 'lucide-react-native';
+import {saveApiConfig} from '../../services/config';
 
+/**
+ * App-level sign-in (local session). Hub connection comes next.
+ */
 const LoginScreen = ({navigation}) => {
+  const [fullName, setFullName] = useState('');
+  const [caregiverPhone, setCaregiverPhone] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const enterApp = async ({requireUser}) => {
+  const handleSignIn = async () => {
+    const name = fullName.trim();
+    const phone = caregiverPhone.trim();
+    if (!name) {
+      Alert.alert('Missing name', 'Enter your name to sign in.');
+      return;
+    }
+    if (!phone) {
+      Alert.alert(
+        'Missing phone',
+        'Enter a caregiver phone number (e.g. +233…).',
+      );
+      return;
+    }
+
     setLoading(true);
     try {
-      const cfg = await getApiConfig();
-      if (requireUser && !cfg.userId) {
-        Alert.alert(
-          'Select a patient',
-          'Open Settings → Device Connection, test the hub, and pick a user.',
-          [
-            {text: 'Cancel', style: 'cancel'},
-            {
-              text: 'Device Connection',
-              onPress: () => navigation.navigate('DeviceConnection'),
-            },
-          ],
-        );
-        return;
-      }
-      try {
-        await api.health();
-      } catch (err) {
-        Alert.alert(
-          'Hub offline',
-          err.message ||
-            'Cannot reach the PillSafe hub. Check Wi-Fi / Device Connection.',
-          [
-            {text: 'Continue offline', onPress: () => navigation.replace('MainApp')},
-            {
-              text: 'Device Connection',
-              onPress: () => navigation.navigate('DeviceConnection'),
-            },
-          ],
-        );
-        return;
-      }
-      navigation.replace('MainApp');
+      await saveApiConfig({
+        userName: name,
+        caregiverPhone: phone,
+        signedIn: true,
+      });
+      navigation.replace('DeviceConnection', {afterLogin: true});
+    } catch (err) {
+      Alert.alert('Sign-in failed', err?.message || String(err));
     } finally {
       setLoading(false);
     }
@@ -66,48 +60,57 @@ const LoginScreen = ({navigation}) => {
           <Text style={styles.logoTextPill}>Pill</Text>
           <Text style={styles.logoTextSafe}>Safe</Text>
         </View>
-        <Text style={styles.title}>Welcome to PillSafe</Text>
+        <Text style={styles.title}>Sign in</Text>
         <Text style={styles.subtitle}>
-          Connect to the dispenser hotspot, then open the live caregiver/patient
-          screens. There is no cloud login — the hub owns users and schedules.
+          Start with your details. After sign-in you will connect to the
+          PillSafe hub.
         </Text>
       </View>
 
       <View style={styles.formCard}>
+        <Text style={styles.label}>Full Name</Text>
+        <View style={styles.inputContainer}>
+          <User size={18} color="#9CA3AF" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="Your name"
+            placeholderTextColor="#9CA3AF"
+            value={fullName}
+            onChangeText={setFullName}
+            autoCapitalize="words"
+          />
+        </View>
+
+        <Text style={styles.label}>Caregiver Phone</Text>
+        <View style={styles.inputContainer}>
+          <Phone size={18} color="#9CA3AF" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="+233…"
+            placeholderTextColor="#9CA3AF"
+            value={caregiverPhone}
+            onChangeText={setCaregiverPhone}
+            keyboardType="phone-pad"
+          />
+        </View>
+
         <TouchableOpacity
           style={styles.loginButton}
-          onPress={() => enterApp({requireUser: true})}
+          onPress={handleSignIn}
           disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <>
-              <Wifi size={18} color="#FFFFFF" />
-              <Text style={styles.loginButtonText}>CONNECT TO HUB</Text>
-            </>
+            <Text style={styles.loginButtonText}>SIGN IN</Text>
           )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigation.navigate('DeviceConnection')}
-          disabled={loading}>
-          <Users size={18} color="#3B5BDB" />
-          <Text style={styles.secondaryButtonText}>DEVICE CONNECTION</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.demoButton}
-          onPress={() => navigation.replace('MainApp')}
-          disabled={loading}>
-          <Text style={styles.demoButtonText}>CONTINUE WITHOUT HUB (UI ONLY)</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.signupLink}
           onPress={() => navigation.navigate('SignUp')}>
           <Text style={styles.signupLinkText}>
-            New patient? <Text style={styles.signupBold}>Register on hub</Text>
+            New patient?{' '}
+            <Text style={styles.signupBold}>Register on hub</Text>
           </Text>
         </TouchableOpacity>
       </View>
@@ -152,57 +155,45 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 24,
-    gap: 12,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.06,
     shadowRadius: 12,
     elevation: 3,
   },
+  label: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 14,
+    marginBottom: 4,
+  },
+  inputIcon: {marginRight: 10},
+  input: {flex: 1, paddingVertical: 14, fontSize: 15, color: '#111827'},
   loginButton: {
     backgroundColor: '#3B5BDB',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
+    marginTop: 24,
   },
   loginButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 'bold',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
-  secondaryButton: {
-    borderWidth: 1.5,
-    borderColor: '#3B5BDB',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: '#3B5BDB',
-    fontSize: 14,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
-  },
-  demoButton: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  demoButtonText: {
-    color: '#6B7280',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  signupLink: {alignItems: 'center', marginTop: 8},
+  signupLink: {alignItems: 'center', marginTop: 18},
   signupLinkText: {fontSize: 13, color: '#6B7280'},
   signupBold: {color: '#3B5BDB', fontWeight: '700'},
 });

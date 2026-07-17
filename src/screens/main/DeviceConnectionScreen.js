@@ -19,7 +19,8 @@ import {
 } from '../../services/config';
 import {api} from '../../services/api';
 
-const DeviceConnectionScreen = ({navigation}) => {
+const DeviceConnectionScreen = ({navigation, route}) => {
+  const afterLogin = Boolean(route?.params?.afterLogin);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [token, setToken] = useState(DEFAULT_TOKEN);
   const [userId, setUserId] = useState('');
@@ -53,8 +54,15 @@ const DeviceConnectionScreen = ({navigation}) => {
         token: token.trim(),
         userId: userId ? Number(userId) : null,
         userName: selected ? selected.full_name : null,
+        signedIn: true,
       });
-      Alert.alert('Saved', 'Device connection settings updated.');
+      if (afterLogin) {
+        Alert.alert('Connected', 'Opening the dashboard.', [
+          {text: 'Continue', onPress: () => navigation.replace('MainApp')},
+        ]);
+      } else {
+        Alert.alert('Saved', 'Device connection settings updated.');
+      }
     } catch (err) {
       Alert.alert('Error', String(err.message || err));
     }
@@ -99,7 +107,13 @@ const DeviceConnectionScreen = ({navigation}) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}>
+          onPress={() => {
+            if (afterLogin) {
+              navigation.replace('MainApp');
+            } else {
+              navigation.goBack();
+            }
+          }}>
           <ChevronLeft size={22} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Device Connection</Text>
@@ -112,8 +126,9 @@ const DeviceConnectionScreen = ({navigation}) => {
           <Text style={styles.cardTitle}>PillSafe Hub API</Text>
         </View>
         <Text style={styles.hint}>
-          Connect to the Raspberry Pi hotspot (PillSafe-AP) or the same LAN,
-          then set the API URL and Bearer token from config.yaml.
+          {afterLogin
+            ? 'You are signed in. Connect to the hub (PC or Raspberry Pi), test the link, pick your patient, then continue.'
+            : 'Connect to the Raspberry Pi hotspot (PillSafe-AP) or the same LAN, then set the API URL and Bearer token from config.yaml.'}
         </Text>
 
         <Text style={styles.label}>API BASE URL</Text>

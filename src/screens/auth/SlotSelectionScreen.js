@@ -71,12 +71,13 @@ const SlotSelectionScreen = ({navigation, route}) => {
       if (userId == null) {
         throw new Error('Hub did not return a user_id');
       }
-      await saveApiConfig({userId, userName: fullName});
+      await saveApiConfig({userId, userName: fullName, signedIn: true});
       navigation.navigate('FaceEnroll');
     } catch (err) {
       Alert.alert(
         'Could not create user',
-        err.message ||
+        err?.message ||
+          String(err) ||
           'Check Device Connection (hub URL + token) and try again.',
       );
     } finally {

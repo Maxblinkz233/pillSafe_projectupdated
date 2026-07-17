@@ -14,15 +14,16 @@ async function request(path, {method = 'GET', body, query} = {}) {
   let url = `${baseUrl}${path}`;
 
   if (query) {
-    const params = new URLSearchParams();
+    const parts = [];
     Object.entries(query).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
-        params.append(key, String(value));
+        parts.push(
+          `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`,
+        );
       }
     });
-    const qs = params.toString();
-    if (qs) {
-      url += `?${qs}`;
+    if (parts.length) {
+      url += `?${parts.join('&')}`;
     }
   }
 
@@ -155,6 +156,13 @@ export const api = {
   getVoiceChallenge: () => request('/voice/challenge'),
 
   getEnrolStatus: (userId) => request(`/users/${userId}/enrol/status`),
+
+  getUser: (userId) => request(`/users`).then(users =>
+    (users || []).find(u => Number(u.user_id) === Number(userId)) || null,
+  ),
+
+  deleteUser: (userId) =>
+    request(`/users/${userId}`, {method: 'DELETE'}),
 };
 
 /** Today's date as YYYY-MM-DD in local time. */
@@ -210,10 +218,25 @@ export function notificationTypeLabel(type) {
   }
 }
 
+function minutesNow() {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function doseTimeMinutes(hhmm) {
+  const parts = String(hhmm || '00:00').split(':');
+  const h = Number(parts[0]);
+  const m = Number(parts[1] || 0);
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return h * 60 + m;
+}
+
 /**
  * Merge schedules with today's adherence logs into UI-friendly dose rows.
+ * Past due times with no TAKEN log become overdue/missed so one late dose
+ * cannot block verifying a later medication.
  */
-export function buildTodayDoses(schedules, adherenceLogs) {
+export function buildTodayDoses(schedules, adherenceLogs, graceMinutes = 15) {
   const bySchedule = {};
   (adherenceLogs || []).forEach(log => {
     const sid = log.schedule_id;
@@ -221,6 +244,8 @@ export function buildTodayDoses(schedules, adherenceLogs) {
       bySchedule[sid] = log;
     }
   });
+
+  const nowMins = minutesNow();
 
   return (schedules || []).map(sched => {
     const log = bySchedule[sched.schedule_id];
@@ -230,10 +255,21 @@ export function buildTodayDoses(schedules, adherenceLogs) {
       if (log.outcome === 'TAKEN') {
         status = 'taken';
         takenAt = log.actual_time || null;
-      } else if (log.outcome === 'MISSED' || log.outcome === 'REJECTED') {
+      } else if (
+        log.outcome === 'MISSED' ||
+        log.outcome === 'REJECTED' ||
+        log.outcome === 'MECHANICAL_ERROR'
+      ) {
         status = 'missed';
-      } else if (log.outcome === 'MECHANICAL_ERROR') {
+      }
+    } else {
+      const due = doseTimeMinutes(sched.dose_time);
+      if (nowMins > due + Number(graceMinutes || 0)) {
         status = 'missed';
+      } else if (nowMins >= due) {
+        status = 'due';
+      } else {
+        status = 'pending';
       }
     }
 
@@ -271,12 +307,34 @@ export function computeDashboardStats(doses, deviceOnline) {
   };
 }
 
-export function nextPendingDose(doses) {
-  const pending = doses
-    .filter(d => d.status === 'pending')
+/** Doses the patient can still verify (due now, upcoming, or missed/late). */
+export function actionableDoses(doses) {
+  return (doses || [])
+    .filter(d => d.status === 'due' || d.status === 'pending' || d.status === 'missed')
     .slice()
     .sort((a, b) => String(a.time).localeCompare(String(b.time)));
-  return pending[0] || null;
+}
+
+/**
+ * Next dispense card: prefer due-now, then soonest future pending,
+ * then soonest missed (late catch-up) — never lock on one overdue forever.
+ */
+export function nextPendingDose(doses) {
+  const list = doses || [];
+  const due = list
+    .filter(d => d.status === 'due')
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  if (due[0]) return due[0];
+
+  const pending = list
+    .filter(d => d.status === 'pending')
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  if (pending[0]) return pending[0];
+
+  const missed = list
+    .filter(d => d.status === 'missed')
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  return missed[0] || null;
 }
 
 export function greetingForNow() {

@@ -167,6 +167,16 @@ const VoiceEnrollScreen = ({navigation}) => {
         </TouchableOpacity>
       )}
 
+      {(step === 'ready' || step === 'error') && (
+        <TouchableOpacity
+          style={styles.skipButton}
+          onPress={() => navigation.navigate('EnrollSuccess')}>
+          <Text style={styles.skipButtonText}>
+            SKIP VOICE (FACE ONLY) →
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => navigation.goBack()}>
@@ -314,6 +324,20 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  skipButton: {
+    borderWidth: 1.5,
+    borderColor: '#3B5BDB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  skipButtonText: {
+    color: '#3B5BDB',
+    fontSize: 14,
+    fontWeight: '700',
     letterSpacing: 0.5,
   },
   backButton: {alignItems: 'center', paddingVertical: 12},
