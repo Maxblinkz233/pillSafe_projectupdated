@@ -124,6 +124,7 @@ class PillSafeSystem:
             enrolment_manager=self.enrolment,
             rtc=self.rtc,
             gsm=self.gsm,
+            camera=self.camera,
         )
 
         self._running = False
@@ -394,7 +395,10 @@ class PillSafeSystem:
 
         slot = self.db.get_slot_inventory(event.compartment_index, event.slot_index)
         threshold = int(slot["low_threshold"]) if slot else 0
-        if new_count <= threshold:
+        if (new_count <= threshold and
+                self.db.claim_low_inventory_alert(
+                    event.compartment_index, event.slot_index
+                )):
             msg = (f"Low inventory: {event.medication_name} "
                    f"(compartment {event.compartment_index}, slot {event.slot_index}) "
                    f"— {new_count} pill(s) left")

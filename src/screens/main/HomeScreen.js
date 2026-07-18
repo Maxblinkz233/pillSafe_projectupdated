@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -23,8 +23,8 @@ import {
   FlaskConical,
   Info,
 } from 'lucide-react-native';
-import {useFocusEffect} from '@react-navigation/native';
-import {getApiConfig} from '../../services/config';
+import { useFocusEffect } from '@react-navigation/native';
+import { getApiConfig } from '../../services/config';
 import {
   api,
   buildTodayDoses,
@@ -35,13 +35,11 @@ import {
   todayIsoDate,
 } from '../../services/api';
 
-const HomeScreen = ({navigation}) => {
+const HomeScreen = ({ navigation }) => {
   const [userName, setUserName] = useState('Patient');
   const [userId, setUserId] = useState(null);
   const [doses, setDoses] = useState([]);
-  const [stats, setStats] = useState(
-    computeDashboardStats([], false),
-  );
+  const [stats, setStats] = useState(computeDashboardStats([], false));
   const [nextDose, setNextDose] = useState(null);
   const [missedDose, setMissedDose] = useState(null);
   const [unread, setUnread] = useState(0);
@@ -50,6 +48,10 @@ const HomeScreen = ({navigation}) => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [enrolment, setEnrolment] = useState({
+    faceEnrolled: true,
+    voiceEnrolled: true,
+  });
 
   const load = useCallback(async () => {
     try {
@@ -76,10 +78,11 @@ const HomeScreen = ({navigation}) => {
         return;
       }
 
-      const [schedules, logs, notifications] = await Promise.all([
+      const [schedules, logs, notifications, enrolStatus] = await Promise.all([
         api.getSchedules(cfg.userId),
         api.getAdherence(cfg.userId, todayIsoDate()),
         api.getNotifications(cfg.userId, true),
+        api.getEnrolStatus(cfg.userId),
       ]);
 
       const todayDoses = buildTodayDoses(schedules, logs);
@@ -87,7 +90,14 @@ const HomeScreen = ({navigation}) => {
       setStats(computeDashboardStats(todayDoses, online));
       setNextDose(nextPendingDose(todayDoses));
       setMissedDose(todayDoses.find(d => d.status === 'missed') || null);
-      setUnread((notifications || []).length);
+      const faceEnrolled = Boolean(enrolStatus?.face_enrolled);
+      const voiceEnrolled = Boolean(enrolStatus?.voice_enrolled);
+      setEnrolment({ faceEnrolled, voiceEnrolled });
+      setUnread(
+        (notifications || []).length +
+          (faceEnrolled ? 0 : 1) +
+          (voiceEnrolled ? 0 : 1),
+      );
       setError('');
     } catch (err) {
       setError(err.message || String(err));
@@ -116,13 +126,15 @@ const HomeScreen = ({navigation}) => {
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }>
+      }
+    >
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.headerLeft}
-          onPress={() => navigation.navigate('Profile')}>
+          onPress={() => navigation.navigate('Profile')}
+        >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials(userName)}</Text>
           </View>
@@ -133,7 +145,8 @@ const HomeScreen = ({navigation}) => {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.bellContainer}
-          onPress={() => navigation.navigate('Alerts')}>
+          onPress={() => navigation.navigate('Alerts')}
+        >
           <Bell size={24} color="#374151" />
           {unread > 0 && <View style={styles.bellBadge} />}
         </TouchableOpacity>
@@ -142,9 +155,37 @@ const HomeScreen = ({navigation}) => {
       {!!error && (
         <TouchableOpacity
           style={styles.errorBanner}
-          onPress={() => navigation.navigate('DeviceConnection')}>
+          onPress={() => navigation.navigate('DeviceConnection')}
+        >
           <Text style={styles.errorBannerText}>{error}</Text>
         </TouchableOpacity>
+      )}
+
+      {(!enrolment.faceEnrolled || !enrolment.voiceEnrolled) && (
+        <View style={styles.enrolBanner}>
+          <AlertTriangle size={20} color="#92400E" />
+          <View style={styles.enrolBannerText}>
+            <Text style={styles.enrolBannerTitle}>
+              Complete biometric enrolment
+            </Text>
+            <Text style={styles.enrolBannerSub}>
+              {!enrolment.faceEnrolled && !enrolment.voiceEnrolled
+                ? 'Face and voice enrolment are still required.'
+                : !enrolment.faceEnrolled
+                ? 'Face enrolment is still required.'
+                : 'Voice enrolment is still required.'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate(
+                !enrolment.faceEnrolled ? 'FaceEnroll' : 'VoiceEnroll',
+              )
+            }
+          >
+            <Text style={styles.enrolBannerAction}>ENROL</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {missedDose && (
@@ -161,14 +202,15 @@ const HomeScreen = ({navigation}) => {
           </View>
           <TouchableOpacity
             style={styles.takeNowButton}
-            onPress={() => navigation.navigate('Verify')}>
+            onPress={() => navigation.navigate('Verify')}
+          >
             <Text style={styles.takeNowText}>VERIFY</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {loading ? (
-        <ActivityIndicator color="#3B5BDB" style={{marginVertical: 24}} />
+        <ActivityIndicator color="#3B5BDB" style={{ marginVertical: 24 }} />
       ) : (
         <>
           <View style={styles.statsGrid}>
@@ -182,14 +224,14 @@ const HomeScreen = ({navigation}) => {
             <View style={styles.statCard}>
               <BarChart2 size={22} color="#10B981" />
               <Text style={styles.statLabel}>Adherence</Text>
-              <Text style={[styles.statValue, {color: '#10B981'}]}>
+              <Text style={[styles.statValue, { color: '#10B981' }]}>
                 {stats.adherence}%
               </Text>
             </View>
             <View style={styles.statCard}>
               <X size={22} color="#EF4444" />
               <Text style={styles.statLabel}>Missed</Text>
-              <Text style={[styles.statValue, {color: '#EF4444'}]}>
+              <Text style={[styles.statValue, { color: '#EF4444' }]}>
                 {stats.missed}
               </Text>
             </View>
@@ -203,7 +245,8 @@ const HomeScreen = ({navigation}) => {
                     color: deviceOnline ? '#10B981' : '#EF4444',
                     fontSize: 16,
                   },
-                ]}>
+                ]}
+              >
                 {stats.deviceStatus}
               </Text>
             </View>
@@ -228,8 +271,8 @@ const HomeScreen = ({navigation}) => {
                         nextDose.status === 'missed'
                           ? 'Missed — verify late'
                           : nextDose.status === 'due'
-                            ? 'Due now'
-                            : 'Upcoming'
+                          ? 'Due now'
+                          : 'Upcoming'
                       }`
                     : 'All caught up for today'}
                 </Text>
@@ -304,7 +347,8 @@ const HomeScreen = ({navigation}) => {
                             ? '#3B5BDB'
                             : '#EF4444',
                       },
-                    ]}>
+                    ]}
+                  >
                     {med.status === 'taken'
                       ? `Taken ${med.takenAt || ''}`.trim()
                       : med.status === 'due'
@@ -328,11 +372,12 @@ const HomeScreen = ({navigation}) => {
                   <View
                     style={[
                       styles.onlineDot,
-                      !deviceOnline && {backgroundColor: '#EF4444'},
+                      !deviceOnline && { backgroundColor: '#EF4444' },
                     ]}
                   />
                   <Text style={styles.deviceOnlineText}>
-                    {deviceOnline ? 'Connected' : 'Offline'} · user #{userId ?? '—'}
+                    {deviceOnline ? 'Connected' : 'Offline'} · user #
+                    {userId ?? '—'}
                   </Text>
                 </View>
                 <Text style={styles.deviceSync}>{baseUrl || 'No URL set'}</Text>
@@ -341,13 +386,15 @@ const HomeScreen = ({navigation}) => {
             <View style={styles.deviceButtons}>
               <TouchableOpacity
                 style={styles.deviceBtn}
-                onPress={() => navigation.navigate('Verify')}>
+                onPress={() => navigation.navigate('Verify')}
+              >
                 <FlaskConical size={14} color="#374151" />
                 <Text style={styles.deviceBtnText}>Verify Now</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.deviceBtnOutline}
-                onPress={() => navigation.navigate('DeviceConnection')}>
+                onPress={() => navigation.navigate('DeviceConnection')}
+              >
                 <Info size={14} color="#374151" />
                 <Text style={styles.deviceBtnOutlineText}>Connection</Text>
               </TouchableOpacity>
@@ -356,7 +403,7 @@ const HomeScreen = ({navigation}) => {
         </>
       )}
 
-      <View style={{height: 20}} />
+      <View style={{ height: 20 }} />
     </ScrollView>
   );
 };
@@ -423,6 +470,23 @@ const styles = StyleSheet.create({
     color: '#991B1B',
     fontSize: 13,
   },
+  enrolBanner: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  enrolBannerText: { flex: 1 },
+  enrolBannerTitle: {
+    color: '#92400E',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  enrolBannerSub: { color: '#92400E', fontSize: 12, marginTop: 2 },
+  enrolBannerAction: { color: '#92400E', fontSize: 12, fontWeight: '800' },
   emptyText: {
     color: '#6B7280',
     fontSize: 14,
@@ -481,7 +545,7 @@ const styles = StyleSheet.create({
     padding: 16,
     width: '47%',
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -569,7 +633,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,

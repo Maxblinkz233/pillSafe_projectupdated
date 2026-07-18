@@ -2,7 +2,9 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS Users (
     user_id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    full_name           TEXT    NOT NULL,
+    full_name           TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+    password_hash       TEXT,
+    caregiver_name      TEXT,
     caregiver_phone     TEXT    NOT NULL,
     compartment_index   INTEGER NOT NULL UNIQUE CHECK (compartment_index BETWEEN 0 AND 5),
     enrolment_status    INTEGER DEFAULT 0 CHECK (enrolment_status IN (0, 1)),
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS Inventory (
     medication_name     TEXT,
     pill_count          INTEGER NOT NULL DEFAULT 0 CHECK (pill_count >= 0),
     low_threshold       INTEGER NOT NULL DEFAULT 5 CHECK (low_threshold >= 0),
+    low_alert_sent      INTEGER NOT NULL DEFAULT 0 CHECK (low_alert_sent IN (0, 1)),
     updated_at          TEXT    DEFAULT (datetime('now')),
     UNIQUE (compartment_index, slot_index),
     FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE SET NULL

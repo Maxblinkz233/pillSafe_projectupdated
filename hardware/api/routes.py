@@ -30,9 +30,16 @@ def _voice_enabled() -> bool:
     return bool(voice_cfg and getattr(voice_cfg, "enabled", False) and vr is not None)
 
 
+def _public_user(user: dict | None) -> dict | None:
+    """Never expose password hashes through the mobile API."""
+    if user is None:
+        return None
+    return {key: value for key, value in user.items() if key != "password_hash"}
+
+
 def create_app(db: DatabaseManager,
                enrolment_manager: EnrolmentManager | None = None,
-               rtc=None, gsm=None) -> Flask:
+               rtc=None, gsm=None, camera=None) -> Flask:
     """
     Factory function to create the Flask app with injected dependencies.
     """
@@ -68,10 +75,28 @@ def create_app(db: DatabaseManager,
     @app.route("/health", methods=["GET"])
     def health():
         """System status endpoint — no auth required."""
+        microphone_available = False
+        if _voice_enabled() and vr is not None:
+            try:
+                microphone_available = bool(vr.audio_input_available())
+            except Exception:
+                microphone_available = False
+        devices = {
+            "pi_hub": True,
+            "gsm": bool(gsm and gsm.is_available),
+            "rtc": bool(rtc and rtc.is_available),
+            "camera": bool(camera and camera.is_available),
+            "microphone": microphone_available,
+        }
         status = {
             "system": "running",
-            "rtc_available": rtc.is_available if rtc else False,
-            "gsm_available": gsm.is_available if gsm else False,
+            "rtc_available": devices["rtc"],
+            "gsm_available": devices["gsm"],
+            "camera_available": devices["camera"],
+            "microphone_available": devices["microphone"],
+            "devices": devices,
+            "connected_device_count": sum(1 for available in devices.values()
+                                          if available),
         }
         return jsonify({"status": "success", "data": status}), 200
 
@@ -80,8 +105,46 @@ def create_app(db: DatabaseManager,
     @app.route("/users", methods=["GET"])
     @require_auth
     def get_users():
-        users = db.get_all_users()
+        users = [_public_user(user) for user in db.get_all_users()]
         return jsonify({"status": "success", "data": users}), 200
+
+    @app.route("/auth/login", methods=["POST"])
+    @require_auth
+    def login():
+        data = request.get_json(silent=True) or {}
+        full_name = str(data.get("full_name", "")).strip()
+        password = str(data.get("password", ""))
+        if not full_name or not password:
+            return jsonify({"status": "error",
+                            "error": "full_name and password required"}), 400
+        user = db.authenticate_user(full_name, password)
+        if not user:
+            return jsonify({"status": "error",
+                            "error": "Invalid patient name or password"}), 401
+        return jsonify({"status": "success", "data": _public_user(user)}), 200
+
+    @app.route("/auth/claim", methods=["POST"])
+    @require_auth
+    def claim_account():
+        data = request.get_json(silent=True) or {}
+        required = ["full_name", "caregiver_phone", "password"]
+        if any(not str(data.get(field, "")).strip() for field in required):
+            return jsonify({"status": "error",
+                            "error": "Name, caregiver phone, and password required"}), 400
+        if len(str(data["password"])) < 8:
+            return jsonify({"status": "error",
+                            "error": "Password must be at least 8 characters"}), 400
+        try:
+            user = db.claim_user(
+                str(data["full_name"]),
+                str(data["caregiver_phone"]),
+                str(data["password"]),
+                caregiver_name=data.get("caregiver_name"),
+            )
+            return jsonify({"status": "success",
+                            "data": _public_user(user)}), 200
+        except ValueError as exc:
+            return jsonify({"status": "error", "error": str(exc)}), 400
 
     @app.route("/users", methods=["POST"])
     @require_auth
@@ -89,15 +152,26 @@ def create_app(db: DatabaseManager,
         data = request.get_json()
         if not data:
             return jsonify({"status": "error", "error": "JSON body required"}), 400
-        required = ["full_name", "caregiver_phone", "compartment_index"]
+        required = [
+            "full_name", "password", "caregiver_name",
+            "caregiver_phone", "compartment_index",
+        ]
         for field in required:
-            if field not in data:
+            if field not in data or (
+                    field != "compartment_index"
+                    and not str(data.get(field, "")).strip()
+            ):
                 return jsonify({"status": "error",
                                 "error": f"Missing field: {field}"}), 400
         try:
+            if len(str(data["password"])) < 8:
+                return jsonify({"status": "error",
+                                "error": "Password must be at least 8 characters"}), 400
             user_id = db.create_user(
                 data["full_name"], data["caregiver_phone"],
                 int(data["compartment_index"]),
+                caregiver_name=data["caregiver_name"],
+                password=data["password"],
             )
             return jsonify({"status": "success",
                             "data": {"user_id": user_id}}), 201
@@ -113,7 +187,7 @@ def create_app(db: DatabaseManager,
         success = db.update_user(user_id, **data)
         if success:
             return jsonify({"status": "success",
-                            "data": db.get_user(user_id)}), 200
+                            "data": _public_user(db.get_user(user_id))}), 200
         return jsonify({"status": "error", "error": "Update failed"}), 400
 
     @app.route("/users/<int:user_id>", methods=["DELETE"])

@@ -1,4 +1,4 @@
-import {getApiConfig} from './config';
+import { getApiConfig } from './config';
 
 export class ApiError extends Error {
   constructor(message, status, body) {
@@ -9,8 +9,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, {method = 'GET', body, query} = {}) {
-  const {baseUrl, token} = await getApiConfig();
+async function request(path, { method = 'GET', body, query } = {}) {
+  const { baseUrl, token } = await getApiConfig();
   let url = `${baseUrl}${path}`;
 
   if (query) {
@@ -46,7 +46,7 @@ async function request(path, {method = 'GET', body, query} = {}) {
     throw new ApiError(
       `Cannot reach PillSafe at ${baseUrl}. Check Wi-Fi and Device Connection settings.`,
       0,
-      {error: String(err)},
+      { error: String(err) },
     );
   }
 
@@ -56,7 +56,7 @@ async function request(path, {method = 'GET', body, query} = {}) {
     try {
       payload = JSON.parse(text);
     } catch {
-      payload = {raw: text};
+      payload = { raw: text };
     }
   }
 
@@ -78,21 +78,51 @@ export const api = {
 
   getUsers: () => request('/users'),
 
-  createUser: ({fullName, caregiverPhone, compartmentIndex}) =>
+  login: ({ fullName, password }) =>
+    request('/auth/login', {
+      method: 'POST',
+      body: { full_name: fullName, password },
+    }),
+
+  claimAccount: ({ fullName, caregiverName, caregiverPhone, password }) =>
+    request('/auth/claim', {
+      method: 'POST',
+      body: {
+        full_name: fullName,
+        caregiver_name: caregiverName,
+        caregiver_phone: caregiverPhone,
+        password,
+      },
+    }),
+
+  createUser: ({
+    fullName,
+    password,
+    caregiverName,
+    caregiverPhone,
+    compartmentIndex,
+  }) =>
     request('/users', {
       method: 'POST',
       body: {
         full_name: fullName,
+        password,
+        caregiver_name: caregiverName,
         caregiver_phone: caregiverPhone,
         compartment_index: compartmentIndex,
       },
     }),
 
-  enrolFace: (userId) =>
-    request(`/users/${userId}/enrol`, {method: 'POST'}),
+  updateUser: (userId, fields) =>
+    request(`/users/${userId}`, {
+      method: 'PUT',
+      body: fields,
+    }),
 
-  enrolVoice: (userId) =>
-    request(`/users/${userId}/enrol/voice`, {method: 'POST'}),
+  enrolFace: userId => request(`/users/${userId}/enrol`, { method: 'POST' }),
+
+  enrolVoice: userId =>
+    request(`/users/${userId}/enrol/voice`, { method: 'POST' }),
 
   createSchedule: ({
     userId,
@@ -110,59 +140,66 @@ export const api = {
         medication_name: medicationName,
         dose_time: doseTime,
         slot_index: slotIndex,
-        ...(dosage != null && dosage !== '' ? {dosage} : {}),
+        ...(dosage != null && dosage !== '' ? { dosage } : {}),
         pills_per_dose: pillsPerDose,
         ...(repeatDays != null && repeatDays !== ''
-          ? {repeat_days: repeatDays}
+          ? { repeat_days: repeatDays }
           : {}),
       },
     }),
 
-  getSchedules: (userId) =>
-    request('/schedules', {query: userId != null ? {user_id: userId} : {}}),
+  getSchedules: userId =>
+    request('/schedules', { query: userId != null ? { user_id: userId } : {} }),
 
   getAdherence: (userId, date) =>
     request('/adherence', {
       query: {
-        ...(userId != null ? {user_id: userId} : {}),
-        ...(date ? {date} : {}),
+        ...(userId != null ? { user_id: userId } : {}),
+        ...(date ? { date } : {}),
       },
     }),
 
   getNotifications: (userId, unreadOnly = false) =>
     request('/notifications', {
       query: {
-        ...(userId != null ? {user_id: userId} : {}),
-        ...(unreadOnly ? {unread: 'true'} : {}),
+        ...(userId != null ? { user_id: userId } : {}),
+        ...(unreadOnly ? { unread: 'true' } : {}),
       },
     }),
 
-  markNotificationRead: (notificationId) =>
-    request(`/notifications/${notificationId}/read`, {method: 'POST'}),
+  markNotificationRead: notificationId =>
+    request(`/notifications/${notificationId}/read`, { method: 'POST' }),
 
-  acknowledgeAdherence: (logId) =>
-    request(`/adherence/${logId}/ack`, {method: 'POST'}),
+  acknowledgeAdherence: logId =>
+    request(`/adherence/${logId}/ack`, { method: 'POST' }),
 
-  dispenseRequest: ({userId, scheduleId, authMode = 'face'}) =>
+  dispenseRequest: ({ userId, scheduleId, authMode = 'face' }) =>
     request('/dispense/request', {
       method: 'POST',
       body: {
         user_id: userId,
-        ...(scheduleId != null ? {schedule_id: scheduleId} : {}),
+        ...(scheduleId != null ? { schedule_id: scheduleId } : {}),
         auth_mode: authMode,
       },
     }),
 
   getVoiceChallenge: () => request('/voice/challenge'),
 
-  getEnrolStatus: (userId) => request(`/users/${userId}/enrol/status`),
+  getEnrolStatus: userId => request(`/users/${userId}/enrol/status`),
 
-  getUser: (userId) => request(`/users`).then(users =>
-    (users || []).find(u => Number(u.user_id) === Number(userId)) || null,
-  ),
+  getUser: userId =>
+    request(`/users`).then(
+      users =>
+        (users || []).find(u => Number(u.user_id) === Number(userId)) || null,
+    ),
 
-  deleteUser: (userId) =>
-    request(`/users/${userId}`, {method: 'DELETE'}),
+  deleteUser: userId => request(`/users/${userId}`, { method: 'DELETE' }),
+
+  getInventory: compartmentIndex =>
+    request('/inventory', {
+      query:
+        compartmentIndex != null ? { compartment_index: compartmentIndex } : {},
+    }),
 };
 
 /** Today's date as YYYY-MM-DD in local time. */
@@ -310,7 +347,10 @@ export function computeDashboardStats(doses, deviceOnline) {
 /** Doses the patient can still verify (due now, upcoming, or missed/late). */
 export function actionableDoses(doses) {
   return (doses || [])
-    .filter(d => d.status === 'due' || d.status === 'pending' || d.status === 'missed')
+    .filter(
+      d =>
+        d.status === 'due' || d.status === 'pending' || d.status === 'missed',
+    )
     .slice()
     .sort((a, b) => String(a.time).localeCompare(String(b.time)));
 }

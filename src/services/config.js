@@ -5,6 +5,7 @@ const KEYS = {
   token: '@pillsafe/api_token',
   userId: '@pillsafe/user_id',
   userName: '@pillsafe/user_name',
+  caregiverName: '@pillsafe/caregiver_name',
   caregiverPhone: '@pillsafe/caregiver_phone',
   signedIn: '@pillsafe/signed_in',
 };
@@ -18,21 +19,30 @@ export const DEFAULT_TOKEN = 'CHANGE_ME_ON_FIRST_SETUP';
  * and some installs leave the old multi* methods undefined ("undefined is not a function").
  */
 export async function getApiConfig() {
-  const [baseUrl, token, userId, userName, caregiverPhone, signedIn] =
-    await Promise.all([
-      AsyncStorage.getItem(KEYS.baseUrl),
-      AsyncStorage.getItem(KEYS.token),
-      AsyncStorage.getItem(KEYS.userId),
-      AsyncStorage.getItem(KEYS.userName),
-      AsyncStorage.getItem(KEYS.caregiverPhone),
-      AsyncStorage.getItem(KEYS.signedIn),
-    ]);
+  const [
+    baseUrl,
+    token,
+    userId,
+    userName,
+    caregiverName,
+    caregiverPhone,
+    signedIn,
+  ] = await Promise.all([
+    AsyncStorage.getItem(KEYS.baseUrl),
+    AsyncStorage.getItem(KEYS.token),
+    AsyncStorage.getItem(KEYS.userId),
+    AsyncStorage.getItem(KEYS.userName),
+    AsyncStorage.getItem(KEYS.caregiverName),
+    AsyncStorage.getItem(KEYS.caregiverPhone),
+    AsyncStorage.getItem(KEYS.signedIn),
+  ]);
 
   return {
     baseUrl: (baseUrl || DEFAULT_BASE_URL).replace(/\/$/, ''),
     token: token || DEFAULT_TOKEN,
     userId: userId ? Number(userId) : null,
     userName: userName || null,
+    caregiverName: caregiverName || null,
     caregiverPhone: caregiverPhone || null,
     signedIn: signedIn === '1',
   };
@@ -43,6 +53,7 @@ export async function saveApiConfig({
   token,
   userId,
   userName,
+  caregiverName,
   caregiverPhone,
   signedIn,
 }) {
@@ -61,6 +72,9 @@ export async function saveApiConfig({
   if (userName != null) {
     ops.push(AsyncStorage.setItem(KEYS.userName, String(userName)));
   }
+  if (caregiverName != null) {
+    ops.push(AsyncStorage.setItem(KEYS.caregiverName, String(caregiverName)));
+  }
   if (caregiverPhone != null) {
     ops.push(AsyncStorage.setItem(KEYS.caregiverPhone, String(caregiverPhone)));
   }
@@ -76,6 +90,7 @@ export async function clearSessionUser() {
   await Promise.all([
     AsyncStorage.removeItem(KEYS.userId),
     AsyncStorage.removeItem(KEYS.userName),
+    AsyncStorage.removeItem(KEYS.caregiverName),
     AsyncStorage.removeItem(KEYS.caregiverPhone),
     AsyncStorage.removeItem(KEYS.signedIn),
   ]);

@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,17 +10,18 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import {ChevronLeft, Wifi, CheckCircle, XCircle} from 'lucide-react-native';
+import { ChevronLeft, Wifi, CheckCircle, XCircle } from 'lucide-react-native';
 import {
   DEFAULT_BASE_URL,
   DEFAULT_TOKEN,
   getApiConfig,
   saveApiConfig,
 } from '../../services/config';
-import {api} from '../../services/api';
+import { api } from '../../services/api';
 
-const DeviceConnectionScreen = ({navigation, route}) => {
-  const afterLogin = Boolean(route?.params?.afterLogin);
+const DeviceConnectionScreen = ({ navigation, route }) => {
+  const authIntent = route?.params?.authIntent || null;
+  const accountData = route?.params?.accountData || null;
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [token, setToken] = useState(DEFAULT_TOKEN);
   const [userId, setUserId] = useState('');
@@ -48,21 +49,44 @@ const DeviceConnectionScreen = ({navigation, route}) => {
 
   const onSave = async () => {
     try {
-      const selected = users.find(u => String(u.user_id) === String(userId));
       await saveApiConfig({
         baseUrl: baseUrl.trim(),
         token: token.trim(),
+      });
+      if (authIntent && !health) {
+        await api.health();
+        await api.getUsers(); // also validates the bearer token
+      }
+
+      if (authIntent === 'signup') {
+        navigation.navigate('SlotSelection', accountData);
+        return;
+      }
+
+      if (authIntent === 'login' || authIntent === 'claim') {
+        const user =
+          authIntent === 'claim'
+            ? await api.claimAccount(accountData)
+            : await api.login(accountData);
+        await saveApiConfig({
+          userId: user.user_id,
+          userName: user.full_name,
+          caregiverName: user.caregiver_name || '',
+          caregiverPhone: user.caregiver_phone,
+          signedIn: true,
+        });
+        navigation.reset({ index: 0, routes: [{ name: 'MainApp' }] });
+        return;
+      }
+
+      const selected = users.find(u => String(u.user_id) === String(userId));
+      await saveApiConfig({
         userId: userId ? Number(userId) : null,
         userName: selected ? selected.full_name : null,
-        signedIn: true,
+        caregiverName: selected?.caregiver_name || '',
+        caregiverPhone: selected?.caregiver_phone || '',
       });
-      if (afterLogin) {
-        Alert.alert('Connected', 'Opening the dashboard.', [
-          {text: 'Continue', onPress: () => navigation.replace('MainApp')},
-        ]);
-      } else {
-        Alert.alert('Saved', 'Device connection settings updated.');
-      }
+      Alert.alert('Saved', 'Device connection settings updated.');
     } catch (err) {
       Alert.alert('Error', String(err.message || err));
     }
@@ -81,7 +105,12 @@ const DeviceConnectionScreen = ({navigation, route}) => {
       setHealth(status);
       const list = await api.getUsers();
       setUsers(list || []);
-      if ((!userId || userId === '') && list && list.length > 0) {
+      if (
+        !authIntent &&
+        (!userId || userId === '') &&
+        list &&
+        list.length > 0
+      ) {
         setUserId(String(list[0].user_id));
       }
     } catch (err) {
@@ -107,17 +136,12 @@ const DeviceConnectionScreen = ({navigation, route}) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => {
-            if (afterLogin) {
-              navigation.replace('MainApp');
-            } else {
-              navigation.goBack();
-            }
-          }}>
+          onPress={() => navigation.goBack()}
+        >
           <ChevronLeft size={22} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Device Connection</Text>
-        <View style={{width: 36}} />
+        <View style={{ width: 36 }} />
       </View>
 
       <View style={styles.card}>
@@ -126,8 +150,8 @@ const DeviceConnectionScreen = ({navigation, route}) => {
           <Text style={styles.cardTitle}>PillSafe Hub API</Text>
         </View>
         <Text style={styles.hint}>
-          {afterLogin
-            ? 'You are signed in. Connect to the hub (PC or Raspberry Pi), test the link, pick your patient, then continue.'
+          {authIntent
+            ? 'Connect to the hub (PC or Raspberry Pi). Your account details will be securely processed after the connection succeeds.'
             : 'Connect to the Raspberry Pi hotspot (PillSafe-AP) or the same LAN, then set the API URL and Bearer token from config.yaml.'}
         </Text>
 
@@ -154,17 +178,21 @@ const DeviceConnectionScreen = ({navigation, route}) => {
           placeholderTextColor="#9CA3AF"
         />
 
-        <Text style={styles.label}>ACTIVE USER ID</Text>
-        <TextInput
-          style={styles.input}
-          value={userId}
-          onChangeText={setUserId}
-          keyboardType="number-pad"
-          placeholder="e.g. 1"
-          placeholderTextColor="#9CA3AF"
-        />
+        {!authIntent && (
+          <>
+            <Text style={styles.label}>ACTIVE USER ID</Text>
+            <TextInput
+              style={styles.input}
+              value={userId}
+              onChangeText={setUserId}
+              keyboardType="number-pad"
+              placeholder="e.g. 1"
+              placeholderTextColor="#9CA3AF"
+            />
+          </>
+        )}
 
-        {users.length > 0 && (
+        {!authIntent && users.length > 0 && (
           <View style={styles.userList}>
             <Text style={styles.label}>USERS ON DEVICE</Text>
             {users.map(u => (
@@ -174,13 +202,17 @@ const DeviceConnectionScreen = ({navigation, route}) => {
                   styles.userRow,
                   String(u.user_id) === String(userId) && styles.userRowActive,
                 ]}
-                onPress={() => setUserId(String(u.user_id))}>
+                onPress={() => setUserId(String(u.user_id))}
+              >
                 <Text
                   style={[
                     styles.userText,
-                    String(u.user_id) === String(userId) && styles.userTextActive,
-                  ]}>
-                  #{u.user_id} — {u.full_name} (compartment {u.compartment_index})
+                    String(u.user_id) === String(userId) &&
+                      styles.userTextActive,
+                  ]}
+                >
+                  #{u.user_id} — {u.full_name} (compartment{' '}
+                  {u.compartment_index})
                 </Text>
               </TouchableOpacity>
             ))}
@@ -206,7 +238,8 @@ const DeviceConnectionScreen = ({navigation, route}) => {
         <TouchableOpacity
           style={styles.testButton}
           onPress={onTest}
-          disabled={testing}>
+          disabled={testing}
+        >
           {testing ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
@@ -215,11 +248,19 @@ const DeviceConnectionScreen = ({navigation, route}) => {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.saveButton} onPress={onSave}>
-          <Text style={styles.saveButtonText}>Save Settings</Text>
+          <Text style={styles.saveButtonText}>
+            {authIntent === 'signup'
+              ? 'Continue to Compartment'
+              : authIntent === 'claim'
+              ? 'Set Password & Login'
+              : authIntent === 'login'
+              ? 'Login'
+              : 'Save Settings'}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      <View style={{height: 40}} />
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 };

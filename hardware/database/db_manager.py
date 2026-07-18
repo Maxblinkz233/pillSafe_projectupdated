@@ -7,6 +7,7 @@ import os
 import sqlite3
 import threading
 from datetime import datetime
+from werkzeug.security import check_password_hash, generate_password_hash
 from utils.config import get_config
 from utils.logger import setup_logger
 
@@ -70,6 +71,23 @@ class DatabaseManager:
             conn.execute("ALTER TABLE AdherenceLog ADD COLUMN auth_mode TEXT")
             logger.info("Migration: added AdherenceLog.auth_mode")
 
+        user_cols = columns("Users")
+        for col, ddl in {
+            "password_hash": "TEXT",
+            "caregiver_name": "TEXT",
+        }.items():
+            if col not in user_cols:
+                conn.execute(f"ALTER TABLE Users ADD COLUMN {col} {ddl}")
+                logger.info("Migration: added Users.%s", col)
+
+        inventory_cols = columns("Inventory")
+        if "low_alert_sent" not in inventory_cols:
+            conn.execute(
+                "ALTER TABLE Inventory ADD COLUMN low_alert_sent "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.info("Migration: added Inventory.low_alert_sent")
+
         # Face embeddings live on disk (data/dataset/<id>/embeddings.npy),
         # not in SQLite — drop the unused table if present.
         conn.execute("DROP TABLE IF EXISTS FaceEmbeddings")
@@ -77,13 +95,27 @@ class DatabaseManager:
     # ── User Operations ──────────────────────────────────────
 
     def create_user(self, full_name: str, caregiver_phone: str,
-                    compartment_index: int) -> int:
+                    compartment_index: int, caregiver_name: str | None = None,
+                    password: str | None = None) -> int:
         with _lock:
             conn = self._get_connection()
             try:
+                duplicate = conn.execute(
+                    "SELECT user_id FROM Users WHERE lower(full_name) = lower(?)",
+                    (full_name.strip(),),
+                ).fetchone()
+                if duplicate:
+                    raise ValueError("A patient with this name already exists")
+                password_hash = (
+                    generate_password_hash(password) if password else None
+                )
                 cursor = conn.execute(
-                    "INSERT INTO Users (full_name, caregiver_phone, compartment_index) VALUES (?, ?, ?)",
-                    (full_name, caregiver_phone, compartment_index),
+                    "INSERT INTO Users "
+                    "(full_name, password_hash, caregiver_name, caregiver_phone, "
+                    "compartment_index) VALUES (?, ?, ?, ?, ?)",
+                    (full_name.strip(), password_hash,
+                     caregiver_name.strip() if caregiver_name else None,
+                     caregiver_phone.strip(), compartment_index),
                 )
                 conn.commit()
                 logger.info("Created user '%s' (id=%d, compartment=%d)",
@@ -108,8 +140,56 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def authenticate_user(self, full_name: str, password: str) -> dict | None:
+        """Return the user when a case-insensitive name/password match succeeds."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM Users WHERE lower(full_name) = lower(?)",
+                (full_name.strip(),),
+            ).fetchone()
+            if not row or not row["password_hash"]:
+                return None
+            return dict(row) if check_password_hash(row["password_hash"], password) else None
+        finally:
+            conn.close()
+
+    def claim_user(self, full_name: str, caregiver_phone: str, password: str,
+                   caregiver_name: str | None = None) -> dict:
+        """Set the first password for a legacy user after phone verification."""
+        with _lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM Users WHERE lower(full_name) = lower(?)",
+                    (full_name.strip(),),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Patient not found")
+                if row["password_hash"]:
+                    raise ValueError("This patient already has a password; use Login")
+                if str(row["caregiver_phone"]).strip() != caregiver_phone.strip():
+                    raise ValueError("Caregiver phone does not match this patient")
+                conn.execute(
+                    "UPDATE Users SET password_hash = ?, caregiver_name = "
+                    "COALESCE(?, caregiver_name) WHERE user_id = ?",
+                    (generate_password_hash(password),
+                     caregiver_name.strip() if caregiver_name else None,
+                     row["user_id"]),
+                )
+                conn.commit()
+                updated = conn.execute(
+                    "SELECT * FROM Users WHERE user_id = ?", (row["user_id"],)
+                ).fetchone()
+                return dict(updated)
+            finally:
+                conn.close()
+
     def update_user(self, user_id: int, **kwargs) -> bool:
-        allowed = {"full_name", "caregiver_phone", "compartment_index", "enrolment_status"}
+        allowed = {
+            "full_name", "caregiver_name", "caregiver_phone",
+            "compartment_index", "enrolment_status",
+        }
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return False
@@ -331,8 +411,13 @@ class DatabaseManager:
                     (compartment_index, slot_index),
                 ).fetchone()
                 if existing:
-                    sets = ["pill_count = ?", "updated_at = datetime('now')"]
-                    vals: list = [int(pill_count)]
+                    sets = [
+                        "pill_count = ?",
+                        "updated_at = datetime('now')",
+                        "low_alert_sent = CASE "
+                        "WHEN ? > low_threshold THEN 0 ELSE low_alert_sent END",
+                    ]
+                    vals: list = [int(pill_count), int(pill_count)]
                     if medication_name is not None:
                         sets.append("medication_name = ?")
                         vals.append(medication_name)
@@ -357,6 +442,23 @@ class DatabaseManager:
                          5 if low_threshold is None else int(low_threshold)),
                     )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def claim_low_inventory_alert(self, compartment_index: int,
+                                  slot_index: int) -> bool:
+        """Atomically mark a low-stock crossing; false if already notified."""
+        with _lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.execute(
+                    "UPDATE Inventory SET low_alert_sent = 1 "
+                    "WHERE compartment_index = ? AND slot_index = ? "
+                    "AND pill_count <= low_threshold AND low_alert_sent = 0",
+                    (compartment_index, slot_index),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
             finally:
                 conn.close()
 

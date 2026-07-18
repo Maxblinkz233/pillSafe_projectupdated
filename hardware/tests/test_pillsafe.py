@@ -98,6 +98,66 @@ def test_dispenser_rejects_bad_indices():
 
 # ── Database: schedules, inventory, notifications ────────────────────────────
 
+def test_password_login_and_unique_patient_name(db):
+    uid = db.create_user(
+        "Sena Boateng", "+233200000010", 0,
+        caregiver_name="Adwoa Boateng", password="safe-pass-123",
+    )
+    stored = db.get_user(uid)
+    assert stored["password_hash"] != "safe-pass-123"
+    assert db.authenticate_user("sena boateng", "safe-pass-123")["user_id"] == uid
+    assert db.authenticate_user("Sena Boateng", "wrong-pass") is None
+    with pytest.raises(ValueError, match="already exists"):
+        db.create_user("SENA BOATENG", "+233200000011", 1,
+                       password="another-pass")
+
+
+def test_legacy_user_can_claim_password_once(db):
+    uid = db.create_user("Legacy Patient", "+233200000012", 0)
+    claimed = db.claim_user(
+        "legacy patient", "+233200000012", "new-password",
+        caregiver_name="Legacy Caregiver",
+    )
+    assert claimed["user_id"] == uid
+    assert claimed["caregiver_name"] == "Legacy Caregiver"
+    assert db.authenticate_user("Legacy Patient", "new-password") is not None
+    with pytest.raises(ValueError, match="already has a password"):
+        db.claim_user("Legacy Patient", "+233200000012", "other-password")
+
+
+def test_auth_api_never_exposes_password_hash(db):
+    from api.routes import create_app
+
+    app = create_app(db)
+    client = app.test_client()
+    headers = {
+        "Authorization": f"Bearer {get_config().api.token}",
+        "Content-Type": "application/json",
+    }
+    created = client.post(
+        "/users",
+        headers=headers,
+        json={
+            "full_name": "API Patient",
+            "password": "secure-password",
+            "caregiver_name": "API Caregiver",
+            "caregiver_phone": "+233200000013",
+            "compartment_index": 0,
+        },
+    )
+    assert created.status_code == 201
+
+    response = client.post(
+        "/auth/login",
+        headers=headers,
+        json={"full_name": "api patient", "password": "secure-password"},
+    )
+    assert response.status_code == 200
+    user = response.get_json()["data"]
+    assert user["caregiver_name"] == "API Caregiver"
+    assert "password_hash" not in user
+
+
 def test_create_schedule_with_slot(db):
     uid = db.create_user("Ama Mensah", "+233200000000", 0)
     sid = db.create_schedule(uid, "Metformin", "08:00", slot_index=3,
@@ -123,11 +183,17 @@ def test_inventory_decrement_and_low_stock(db):
     db.upsert_inventory(2, 0, pill_count=3, medication_name="Aspirin",
                         low_threshold=2, user_id=uid)
     assert db.decrement_inventory(2, 0, 1) == 2
+    assert db.claim_low_inventory_alert(2, 0) is True
+    assert db.claim_low_inventory_alert(2, 0) is False
     assert db.decrement_inventory(2, 0, 5) == 0  # never below zero
     low = db.get_low_inventory()
     assert any(r["compartment_index"] == 2 and r["slot_index"] == 0 for r in low)
     # Untracked slot returns None rather than raising
     assert db.decrement_inventory(5, 8, 1) is None
+    # A refill above threshold arms the next threshold-crossing alert.
+    db.upsert_inventory(2, 0, pill_count=8)
+    assert db.decrement_inventory(2, 0, 6) == 2
+    assert db.claim_low_inventory_alert(2, 0) is True
 
 
 def test_notifications_feed(db):
