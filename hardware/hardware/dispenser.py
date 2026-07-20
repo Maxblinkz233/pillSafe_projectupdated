@@ -36,6 +36,7 @@ class Dispenser:
         self.max_duty = cfg.servo.max_duty
         self.hold_time = cfg.servo.hold_time
         self.max_angle = float(getattr(cfg.servo, "max_angle", 360.0))
+        self.use_slot_indexing = bool(getattr(cfg.servo, "use_slot_indexing", True))
 
         pins = getattr(cfg.servo, "pins", None)
         if not pins:
@@ -81,10 +82,40 @@ class Dispenser:
             2,
         )
 
+    def rotate_to_angle(self, compartment_index: int, angle: float) -> bool:
+        """
+        Drive the compartment servo to an absolute angle (0–max_angle).
+        Used after successful face verification for the scheduled slot angle.
+        """
+        if compartment_index < 0 or compartment_index >= self.num_compartments:
+            logger.error("Invalid compartment: %d (range 0–%d)",
+                         compartment_index, self.num_compartments - 1)
+            return False
+
+        target_angle = max(0.0, min(float(angle), self.max_angle))
+        duty = self._angle_to_duty(target_angle)
+        logger.info("Compartment %d → %.1f° (duty %.2f%%)",
+                    compartment_index, target_angle, duty)
+
+        if gpio.AVAILABLE:
+            pwm = self._pwms.get(compartment_index)
+            if pwm is None:
+                logger.error("No servo configured for compartment %d", compartment_index)
+                return False
+            pwm.ChangeDutyCycle(duty)
+            time.sleep(self.hold_time)
+            pwm.ChangeDutyCycle(0)  # release to prevent jitter/buzz
+        else:
+            logger.debug("[SIM] Compartment %d servo → %.1f°",
+                         compartment_index, target_angle)
+            time.sleep(self.hold_time)
+
+        return True
+
     def rotate_to(self, compartment_index: int, slot_index: int = 0) -> bool:
         """
         Rotate the given compartment so ``slot_index`` aligns with its drop
-        hole. The pill then falls by gravity to the collection base.
+        hole (slot_index × 40° for 9 slots / 360°).
         Returns True on success.
         """
         if compartment_index < 0 or compartment_index >= self.num_compartments:
@@ -97,29 +128,24 @@ class Dispenser:
             return False
 
         target_angle = self._slot_angle(slot_index)
-        duty = self._angle_to_duty(target_angle)
+        ok = self.rotate_to_angle(compartment_index, target_angle)
+        if ok:
+            self._current_slot[compartment_index] = slot_index
+            logger.info(
+                "Compartment %d → slot %d (%.1f°)",
+                compartment_index, slot_index, target_angle,
+            )
+        return ok
 
-        logger.info("Compartment %d → slot %d (%.1f°, duty %.2f%%)",
-                    compartment_index, slot_index, target_angle, duty)
-
-        if gpio.AVAILABLE:
-            pwm = self._pwms.get(compartment_index)
-            if pwm is None:
-                logger.error("No servo configured for compartment %d", compartment_index)
-                return False
-            pwm.ChangeDutyCycle(duty)
-            time.sleep(self.hold_time)
-            pwm.ChangeDutyCycle(0)  # release to prevent jitter/buzz
-        else:
-            logger.debug("[SIM] Compartment %d servo → slot %d at %.1f°",
-                         compartment_index, slot_index, target_angle)
-            time.sleep(self.hold_time)
-
-        self._current_slot[compartment_index] = slot_index
-        return True
+    def dispense(self, compartment_index: int, slot_index: int = 0) -> bool:
+        """
+        Post-verification dispense move: rotate to the medication's slot
+        (40° × slot_index for a 9-slot / 360° cylinder).
+        """
+        return self.rotate_to(compartment_index, slot_index)
 
     def home(self, compartment_index: int | None = None) -> None:
-        """Return one compartment (or all) to slot 0."""
+        """Return one compartment (or all) to slot 0 (0°). Prefer disabled after dispense."""
         if compartment_index is None:
             for c in range(min(self.num_compartments, len(self.pins))):
                 self.rotate_to(c, 0)

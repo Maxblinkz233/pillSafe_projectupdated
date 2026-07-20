@@ -283,7 +283,7 @@ function doseTimeMinutes(hhmm) {
 }
 
 /**
- * Merge schedules with today's adherence logs into UI-friendly dose rows.
+ * Prefer TAKEN over any earlier MISSED/REJECTED for the same schedule today.
  * Past due times with no TAKEN log become overdue/missed so one late dose
  * cannot block verifying a later medication.
  */
@@ -291,7 +291,20 @@ export function buildTodayDoses(schedules, adherenceLogs, graceMinutes = 15) {
   const bySchedule = {};
   (adherenceLogs || []).forEach(log => {
     const sid = log.schedule_id;
-    if (!bySchedule[sid] || log.logged_at > bySchedule[sid].logged_at) {
+    const prev = bySchedule[sid];
+    if (!prev) {
+      bySchedule[sid] = log;
+      return;
+    }
+    // Always prefer TAKEN if any log for this schedule is TAKEN
+    if (log.outcome === 'TAKEN' && prev.outcome !== 'TAKEN') {
+      bySchedule[sid] = log;
+      return;
+    }
+    if (prev.outcome === 'TAKEN' && log.outcome !== 'TAKEN') {
+      return;
+    }
+    if (log.logged_at > prev.logged_at) {
       bySchedule[sid] = log;
     }
   });

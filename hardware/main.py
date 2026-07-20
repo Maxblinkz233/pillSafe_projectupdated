@@ -15,12 +15,13 @@ Startup Sequence:
 
 Operational Workflow (per event):
   1. Scheduler detects a time match → creates DispenseEvent
-  2. Buzzer plays "dose_ready" pattern
+  2. Buzzer plays "dose_ready" + REMINDER notification to the app
   3. Camera activates → face detection + FaceNet (TFLite) verification
-  4. On ACCEPT: servo rotates to compartment → IR confirms pill drop → IR confirms pickup → log TAKEN
-  5. On REJECT (3 failures): log REJECTED → send alert
-  6. On TIMEOUT (grace period): log MISSED → send alert
-  7. Return to idle
+     (each Verify Now = up to 8 captures; SMS after 3 failed sets; lockout after 5)
+  4. On ACCEPT: servo rotates to slot (slot × 40°) → log TAKEN → SMS caregiver
+  5. On REJECT lockout (5 failed sets): log REJECTED (caregiver already SMS'd at set 3)
+  6. On TIMEOUT (grace period): log MISSED → SMS caregiver
+  7. Return to idle (servo is not moved again)
 """
 
 import os
@@ -123,6 +124,10 @@ class PillSafeSystem:
         # blocking Verify Now can hand off to the camera already waiting.
         self._active_dispense_event: DispenseEvent | None = None
         self._active_dispense_lock = threading.Lock()
+        # Failed Verify Now sets per schedule (8 attempts each).
+        # SMS caregiver at set 3; lockout at set 5.
+        self._reject_sets: dict[int, int] = {}
+        self._reject_sms_sent: set[int] = set()
 
         # ── Step 7: Flask API ────────────────────────────────
         self.app = create_app(
@@ -203,9 +208,10 @@ class PillSafeSystem:
             + (f" ({event.dosage})" if event.dosage else ""),
             user_id=event.user_id,
         )
-        self.buzzer.play("dose_ready")
+        # Blocking so the dose-due tone always plays before camera work starts
+        self.buzzer.play("dose_ready", blocking=True)
 
-        # Step 2: Activate camera
+        # Step 2: Activate camera (servo stays still until face is accepted)
         self.camera.start()
 
         cfg = get_config()
@@ -223,12 +229,19 @@ class PillSafeSystem:
                 # Autonomous timer-driven verification
                 self._run_autonomous_verification(event)
         finally:
-            # Return to idle
+            # Return to idle — do NOT home the servo (that moves the motor).
             self.camera.stop()
-            self.dispenser.home(event.compartment_index)
+            dispense_cfg = getattr(get_config(), "dispense", None)
+            if (
+                dispense_cfg is not None
+                and getattr(dispense_cfg, "home_after_dispense", False)
+            ):
+                self.dispenser.home(event.compartment_index)
             with self._active_dispense_lock:
                 if self._active_dispense_event is event:
                     self._active_dispense_event = None
+            self._reject_sets.pop(event.schedule_id, None)
+            self._reject_sms_sent.discard(event.schedule_id)
             logger.info("Returning to idle state")
 
     def verify_and_dispense(
@@ -411,13 +424,30 @@ class PillSafeSystem:
                 expected_user_id=event.user_id,
                 auth_mode=auth_mode,
             )
+            if outcome.result == VerificationResult.REJECTED:
+                handled = self._handle_reject_set(event, auth_mode, outcome)
+                return {
+                    "ok": False,
+                    "http_status": 401,
+                    "result": VerificationResult.REJECTED.value,
+                    "dispensed": False,
+                    "confidence": outcome.confidence,
+                    "auth_mode": auth_mode,
+                    "medication_name": event.medication_name,
+                    "error": handled.get("error"),
+                }
             return self._finalize_verify_outcome(event, auth_mode, outcome)
         finally:
             self.camera.stop()
-            try:
-                self.dispenser.home(event.compartment_index)
-            except Exception as e:
-                logger.error("Failed to home dispenser after on-demand verify: %s", e)
+            dispense_cfg = getattr(get_config(), "dispense", None)
+            if (
+                dispense_cfg is not None
+                and getattr(dispense_cfg, "home_after_dispense", False)
+            ):
+                try:
+                    self.dispenser.home(event.compartment_index)
+                except Exception as e:
+                    logger.error("Failed to home dispenser after on-demand verify: %s", e)
             with self._active_dispense_lock:
                 if self._active_dispense_event is event:
                     self._active_dispense_event = None
@@ -450,13 +480,16 @@ class PillSafeSystem:
             }
 
         if outcome.result == VerificationResult.REJECTED:
-            self._log_and_alert_rejected(event, auth_mode=auth_mode)
+            self._log_and_alert_rejected(event, auth_mode=auth_mode, send_sms=False)
             return {
                 **base,
                 "ok": False,
                 "http_status": 401,
                 "dispensed": False,
-                "error": "Face did not match the enrolled patient",
+                "error": (
+                    "Face did not match after 5 verification sets — "
+                    "dispensing locked"
+                ),
             }
 
         if outcome.result == VerificationResult.NO_FACE:
@@ -513,19 +546,34 @@ class PillSafeSystem:
         """
         Wait for the mobile app to send a "Verify Now" request
         (POST /dispense/request or /dispense/verify), then authenticate
-        in the chosen mode. Repeats until success, hard rejection, or the
-        grace deadline (FR-16).
+        in the chosen mode. Caregiver SMS after 3 failed sets; lockout after 5.
+        Exits on success, lockout, or when the grace deadline is reached (FR-16).
         """
         import time
 
         cfg = get_config()
         dispense_cfg = getattr(cfg, "dispense", None)
         poll = getattr(dispense_cfg, "verify_request_poll_seconds", 2) if dispense_cfg else 2
+        remind_every = (
+            getattr(dispense_cfg, "reminder_buzz_seconds", 30) if dispense_cfg else 30
+        )
+        sms_after = int(getattr(cfg.face, "reject_sets_before_sms", 3) or 3)
+        lockout_after = int(getattr(cfg.face, "reject_sets_before_lockout", 5) or 5)
 
-        logger.info("Awaiting 'Verify Now' from the app until %s",
-                    event.grace_deadline.strftime("%H:%M:%S"))
+        logger.info(
+            "Awaiting 'Verify Now' until %s (SMS after %d fails, lockout after %d)",
+            event.grace_deadline.strftime("%H:%M:%S"),
+            sms_after,
+            lockout_after,
+        )
 
+        last_buzz = time.time()
         while datetime.now() < event.grace_deadline and self._running:
+            # Keep reminding the patient that the dose is due
+            if remind_every and (time.time() - last_buzz) >= remind_every:
+                self.buzzer.play("dose_ready", blocking=False)
+                last_buzz = time.time()
+
             pending = self._consume_verify_request(event)
             if pending is None:
                 time.sleep(poll)
@@ -540,7 +588,12 @@ class PillSafeSystem:
             )
 
             if outcome.result == VerificationResult.ACCEPTED:
-                logger.info("User %d verified — dispensing medication", event.user_id)
+                logger.info(
+                    "User %d verified — dispensing slot %d (%.1f°)",
+                    event.user_id,
+                    event.slot_index,
+                    event.slot_index * 40.0,
+                )
                 dispensed = self._perform_dispense(event, auth_mode=auth_mode)
                 self._publish_verify_result(pending, {
                     "ok": True,
@@ -553,7 +606,7 @@ class PillSafeSystem:
                 })
                 return
             if outcome.result == VerificationResult.REJECTED:
-                self._log_and_alert_rejected(event, auth_mode=auth_mode)
+                handled = self._handle_reject_set(event, auth_mode, outcome)
                 self._publish_verify_result(pending, {
                     "ok": False,
                     "result": VerificationResult.REJECTED.value,
@@ -561,9 +614,12 @@ class PillSafeSystem:
                     "confidence": outcome.confidence,
                     "auth_mode": auth_mode,
                     "medication_name": event.medication_name,
-                    "error": "Face did not match the enrolled patient",
+                    "error": handled.get("error"),
                 })
-                return
+                if handled.get("lockout"):
+                    return
+                time.sleep(poll)
+                continue
             # NO_FACE / model-not-ready / audio error → let the user try again
             result_name = (
                 outcome.result.value
@@ -589,6 +645,80 @@ class PillSafeSystem:
 
         # Grace deadline reached with no successful verification
         self._log_and_alert_missed(event)
+
+    def _handle_reject_set(
+        self, event: DispenseEvent, auth_mode: str, outcome,
+    ) -> dict:
+        """
+        Count a failed face set. SMS caregiver after set 3; lock after set 5.
+        Returns {lockout, sets, error}.
+        """
+        cfg = get_config()
+        sms_after = int(getattr(cfg.face, "reject_sets_before_sms", 3) or 3)
+        lockout_after = int(getattr(cfg.face, "reject_sets_before_lockout", 5) or 5)
+
+        sets = self._reject_sets.get(event.schedule_id, 0) + 1
+        self._reject_sets[event.schedule_id] = sets
+        logger.warning(
+            "Reject set %d (SMS at %d, lockout at %d) for schedule %d",
+            sets, sms_after, lockout_after, event.schedule_id,
+        )
+
+        if sets == sms_after and event.schedule_id not in self._reject_sms_sent:
+            self._sms_reject_warning(event, sets)
+            self._reject_sms_sent.add(event.schedule_id)
+
+        if sets >= lockout_after:
+            # Caregiver already SMS'd at set 3 — lock without a second SMS
+            self._log_and_alert_rejected(event, auth_mode=auth_mode, send_sms=False)
+            return {
+                "lockout": True,
+                "sets": sets,
+                "error": (
+                    f"Face did not match after {lockout_after} verification sets — "
+                    "dispensing locked"
+                ),
+            }
+
+        self.buzzer.play("failure")
+        self._notify(
+            "REJECTED",
+            f"Face did not match for {event.medication_name} "
+            f"(attempt {sets}/{lockout_after}). Try Verify Now again.",
+            user_id=event.user_id,
+        )
+        sms_note = (
+            " Caregiver has been alerted."
+            if sets >= sms_after
+            else ""
+        )
+        return {
+            "lockout": False,
+            "sets": sets,
+            "error": (
+                f"Face did not match (attempt {sets}/{lockout_after}). "
+                f"Stand in front of the hub camera and try again.{sms_note}"
+            ),
+        }
+
+    def _sms_reject_warning(self, event: DispenseEvent, sets: int) -> None:
+        """SMS caregiver after the configured reject threshold (default: 3rd fail)."""
+        try:
+            user = self.db.get_user(event.user_id)
+            if not user or not user.get("caregiver_phone"):
+                return
+            message = (
+                f"[PillSafe ALERT] Face verification failed {sets} times\n"
+                f"Patient: {event.full_name}\n"
+                f"Medication: {event.medication_name}\n"
+                f"Scheduled: {event.scheduled_time}\n"
+                f"Dispensing not locked yet — further attempts allowed."
+            )
+            self.gsm.send_sms(user["caregiver_phone"], message)
+            logger.info("Reject-warning SMS sent after set %d for schedule %d",
+                        sets, event.schedule_id)
+        except Exception as e:
+            logger.error("Reject-warning SMS failed: %s", e)
 
     def _consume_verify_request(self, event: DispenseEvent) -> dict | None:
         """Return and clear a pending Verify-Now request for this event."""
@@ -619,50 +749,42 @@ class PillSafeSystem:
 
     def _perform_dispense(self, event: DispenseEvent, auth_mode: str = "face") -> bool:
         """
-        Rotate the compartment to the target slot, confirm the drop and the
-        pickup via the IR sensors, then log TAKEN, update inventory and
-        notify the app. Returns True if the dose was dispensed and collected.
+        After successful face/voice verification only: rotate the cylinder to
+        the scheduled slot (slot_index × 40° for 9 slots), log TAKEN, notify
+        the app, and SMS the caregiver. IR confirmation is optional when
+        ir_sensors.required is false.
         """
-        # Rotate the compartment's cylinder so the slot aligns with the hole
-        rotated = self.dispenser.rotate_to(event.compartment_index, event.slot_index)
+        cfg = get_config()
+        ir_required = bool(getattr(getattr(cfg, "ir_sensors", None), "required", False))
+
+        # Servo moves ONLY after verification accepted — to the medication slot
+        rotated = self.dispenser.dispense(event.compartment_index, event.slot_index)
         if not rotated:
             self._handle_mechanical_error(event, auth_mode=auth_mode)
             return False
 
-        # IR confirms the pill fell through the delivery tube
-        pill_dropped = self.ir_sensors.wait_for_pill_drop(timeout=5.0)
-        if not pill_dropped:
-            self._handle_mechanical_error(event, auth_mode=auth_mode)
-            return False
-
-        # IR confirms the user collected the pill from the base
-        picked_up = self.ir_sensors.wait_for_pickup(timeout=120.0)
-        if not picked_up:
-            logger.warning(
-                "Pill dropped for user %d but was not collected within timeout",
-                event.user_id,
-            )
-            self.db.log_event(
-                user_id=event.user_id,
-                schedule_id=event.schedule_id,
-                scheduled_time=event.scheduled_time,
-                outcome="MECHANICAL_ERROR",
-                auth_mode=auth_mode,
-            )
-            self.buzzer.play("failure")
-            # Pill left the compartment — still decrement stock
-            self._update_inventory_after_dispense(event)
-            self._notify(
-                "MECHANICAL_ERROR",
-                f"{event.medication_name} dispensed for {event.full_name} "
-                f"but not collected from the tray",
-                user_id=event.user_id,
-            )
-            self.alert_service.send_immediate_alert(
-                event.user_id, event.schedule_id,
-                "MECHANICAL_ERROR", event.scheduled_time,
-            )
-            return False
+        if ir_required:
+            pill_dropped = self.ir_sensors.wait_for_pill_drop(timeout=5.0)
+            if not pill_dropped:
+                self._handle_mechanical_error(event, auth_mode=auth_mode)
+                return False
+            picked_up = self.ir_sensors.wait_for_pickup(timeout=120.0)
+            if not picked_up:
+                logger.warning(
+                    "Pill dropped for user %d but was not collected within timeout",
+                    event.user_id,
+                )
+                # Still count as TAKEN — dose left the compartment
+                logger.info("Logging TAKEN despite pickup timeout (pill was dispensed)")
+        else:
+            # Soft IR check for logs only — never block TAKEN status
+            try:
+                if self.ir_sensors.wait_for_pill_drop(timeout=2.0):
+                    logger.info("IR confirmed pill drop (optional)")
+                else:
+                    logger.info("IR drop not confirmed — continuing (ir_sensors.required=false)")
+            except Exception as e:
+                logger.debug("Optional IR check skipped: %s", e)
 
         actual_time = datetime.now().strftime("%H:%M")
         self.db.log_event(
@@ -673,16 +795,36 @@ class PillSafeSystem:
             actual_time=actual_time,
             auth_mode=auth_mode,
         )
-        self.buzzer.play("success")
+        self.buzzer.play("success", blocking=False)
         self._update_inventory_after_dispense(event)
         self._notify(
             "DISPENSED",
             f"{event.medication_name} dispensed to {event.full_name} at {actual_time}",
             user_id=event.user_id,
         )
-        logger.info("Dose TAKEN by user %d at %s (compartment %d, slot %d)",
-                    event.user_id, actual_time, event.compartment_index, event.slot_index)
+        self._sms_dose_taken(event, actual_time)
+        logger.info(
+            "Dose TAKEN by user %d at %s (compartment %d, slot %d ≈ %.0f°)",
+            event.user_id, actual_time, event.compartment_index,
+            event.slot_index, event.slot_index * 40.0,
+        )
         return True
+
+    def _sms_dose_taken(self, event: DispenseEvent, actual_time: str) -> None:
+        """SMS caregiver when the patient successfully takes their medicine."""
+        try:
+            user = self.db.get_user(event.user_id)
+            if not user or not user.get("caregiver_phone"):
+                return
+            self.gsm.send_taken_dose_alert(
+                patient_name=event.full_name,
+                medication_name=event.medication_name,
+                scheduled_time=event.scheduled_time,
+                actual_time=actual_time,
+                caregiver_phone=user["caregiver_phone"],
+            )
+        except Exception as e:
+            logger.error("Taken-dose SMS failed: %s", e)
 
     def _update_inventory_after_dispense(self, event: DispenseEvent) -> None:
         """Decrement slot inventory and raise a low-stock alert if needed."""
@@ -715,7 +857,8 @@ class PillSafeSystem:
             except Exception as e:
                 logger.error("Low-inventory SMS failed: %s", e)
 
-    def _log_and_alert_rejected(self, event: DispenseEvent, auth_mode: str = "face") -> None:
+    def _log_and_alert_rejected(self, event: DispenseEvent, auth_mode: str = "face",
+                                 send_sms: bool = True) -> None:
         logger.warning("Verification REJECTED for user %d — lockout", event.user_id)
         self.db.log_event(
             user_id=event.user_id,
@@ -730,9 +873,10 @@ class PillSafeSystem:
             f"Verification failed for {event.full_name} ({event.medication_name})",
             user_id=event.user_id,
         )
-        self.alert_service.send_immediate_alert(
-            event.user_id, event.schedule_id, "REJECTED", event.scheduled_time,
-        )
+        if send_sms:
+            self.alert_service.send_immediate_alert(
+                event.user_id, event.schedule_id, "REJECTED", event.scheduled_time,
+            )
 
     def _log_and_alert_missed(self, event: DispenseEvent, auth_mode: str | None = None) -> None:
         logger.warning("Grace period expired — dose MISSED for user %d", event.user_id)

@@ -129,6 +129,14 @@ class AlertService:
                 caregiver_phone=user["caregiver_phone"],
                 scheduled_time=scheduled_time,
             )
+        elif outcome == "TAKEN":
+            self.gsm.send_taken_dose_alert(
+                patient_name=user["full_name"],
+                medication_name=schedule["medication_name"],
+                scheduled_time=scheduled_time,
+                actual_time=scheduled_time,
+                caregiver_phone=user["caregiver_phone"],
+            )
         else:
             self.gsm.send_missed_dose_alert(
                 patient_name=user["full_name"],

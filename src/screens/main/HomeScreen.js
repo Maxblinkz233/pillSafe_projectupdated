@@ -112,6 +112,10 @@ const HomeScreen = ({ navigation }) => {
     useCallback(() => {
       setLoading(true);
       load();
+      const timer = setInterval(() => {
+        load();
+      }, 20000);
+      return () => clearInterval(timer);
     }, [load]),
   );
 
