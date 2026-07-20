@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,21 +9,23 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import {CheckCircle} from 'lucide-react-native';
-import {api} from '../../services/api';
-import {saveApiConfig} from '../../services/config';
+import { CheckCircle } from 'lucide-react-native';
+import { api } from '../../services/api';
+import { saveApiConfig } from '../../services/config';
 
 const COMPARTMENTS = [
-  {id: 'A', index: 0},
-  {id: 'B', index: 1},
-  {id: 'C', index: 2},
-  {id: 'D', index: 3},
-  {id: 'E', index: 4},
-  {id: 'F', index: 5},
+  { id: 'A', index: 0 },
+  { id: 'B', index: 1 },
+  { id: 'C', index: 2 },
+  { id: 'D', index: 3 },
+  { id: 'E', index: 4 },
+  { id: 'F', index: 5 },
 ];
 
-const SlotSelectionScreen = ({navigation, route}) => {
+const SlotSelectionScreen = ({ navigation, route }) => {
   const fullName = route?.params?.fullName || '';
+  const password = route?.params?.password || '';
+  const caregiverName = route?.params?.caregiverName || '';
   const caregiverPhone = route?.params?.caregiverPhone || '';
   const [selectedIndex, setSelectedIndex] = useState(2);
   const [saving, setSaving] = useState(false);
@@ -48,7 +50,7 @@ const SlotSelectionScreen = ({navigation, route}) => {
   }, []);
 
   const handleContinue = async () => {
-    if (!fullName || !caregiverPhone) {
+    if (!fullName || !password || !caregiverName || !caregiverPhone) {
       Alert.alert(
         'Missing signup details',
         'Go back and enter name and caregiver phone first.',
@@ -64,6 +66,8 @@ const SlotSelectionScreen = ({navigation, route}) => {
     try {
       const result = await api.createUser({
         fullName,
+        password,
+        caregiverName,
         caregiverPhone,
         compartmentIndex: selectedIndex,
       });
@@ -71,12 +75,19 @@ const SlotSelectionScreen = ({navigation, route}) => {
       if (userId == null) {
         throw new Error('Hub did not return a user_id');
       }
-      await saveApiConfig({userId, userName: fullName});
+      await saveApiConfig({
+        userId,
+        userName: fullName,
+        caregiverName,
+        caregiverPhone,
+        signedIn: true,
+      });
       navigation.navigate('FaceEnroll');
     } catch (err) {
       Alert.alert(
         'Could not create user',
-        err.message ||
+        err?.message ||
+          String(err) ||
           'Check Device Connection (hub URL + token) and try again.',
       );
     } finally {
@@ -126,13 +137,15 @@ const SlotSelectionScreen = ({navigation, route}) => {
               onPress={() => {
                 if (!inUse) setSelectedIndex(slot.index);
               }}
-              disabled={inUse}>
+              disabled={inUse}
+            >
               <Text
                 style={[
                   styles.slotLetter,
                   inUse && styles.slotLetterInuse,
                   selected && !inUse && styles.slotLetterSelected,
-                ]}>
+                ]}
+              >
                 {slot.id}
               </Text>
               {selected && !inUse ? (
@@ -145,7 +158,8 @@ const SlotSelectionScreen = ({navigation, route}) => {
                   style={[
                     styles.slotStatus,
                     inUse ? styles.slotStatusInuse : styles.slotStatusAvailable,
-                  ]}>
+                  ]}
+                >
                   {inUse ? 'In use' : `Compartment ${slot.index}`}
                 </Text>
               )}
@@ -158,13 +172,15 @@ const SlotSelectionScreen = ({navigation, route}) => {
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
-          disabled={saving}>
+          disabled={saving}
+        >
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.continueButton, saving && styles.continueDisabled]}
           onPress={handleContinue}
-          disabled={saving}>
+          disabled={saving}
+        >
           {saving ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
@@ -190,7 +206,7 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     marginBottom: 24,
   },
-  headerLeft: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {
     width: 40,
     height: 40,
@@ -199,9 +215,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {color: '#FFFFFF', fontSize: 16, fontWeight: 'bold'},
-  patientLabel: {fontSize: 11, color: '#6B7280'},
-  userName: {fontSize: 15, fontWeight: 'bold', color: '#111827'},
+  avatarText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  patientLabel: { fontSize: 11, color: '#6B7280' },
+  userName: { fontSize: 15, fontWeight: 'bold', color: '#111827' },
   logoBadge: {
     flexDirection: 'row',
     backgroundColor: '#3B5BDB',
@@ -209,8 +225,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  logoTextPill: {fontSize: 14, fontWeight: 'bold', color: '#FFFFFF'},
-  logoTextSafe: {fontSize: 14, fontWeight: 'bold', color: '#A5F3FC'},
+  logoTextPill: { fontSize: 14, fontWeight: 'bold', color: '#FFFFFF' },
+  logoTextSafe: { fontSize: 14, fontWeight: 'bold', color: '#A5F3FC' },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -242,23 +258,23 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     gap: 6,
   },
-  slotCardInuse: {backgroundColor: '#F3F4F6', borderColor: '#E5E7EB'},
-  slotCardSelected: {borderColor: '#3B5BDB', backgroundColor: '#EEF2FF'},
-  slotLetter: {fontSize: 22, fontWeight: 'bold', color: '#111827'},
-  slotLetterInuse: {color: '#9CA3AF'},
-  slotLetterSelected: {color: '#3B5BDB'},
-  selectedRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
-  selectedText: {fontSize: 11, color: '#3B5BDB', fontWeight: '600'},
-  slotStatus: {fontSize: 11, fontWeight: '500'},
-  slotStatusAvailable: {color: '#6B7280'},
-  slotStatusInuse: {color: '#9CA3AF'},
-  buttonRow: {flexDirection: 'row', gap: 12},
+  slotCardInuse: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  slotCardSelected: { borderColor: '#3B5BDB', backgroundColor: '#EEF2FF' },
+  slotLetter: { fontSize: 22, fontWeight: 'bold', color: '#111827' },
+  slotLetterInuse: { color: '#9CA3AF' },
+  slotLetterSelected: { color: '#3B5BDB' },
+  selectedRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  selectedText: { fontSize: 11, color: '#3B5BDB', fontWeight: '600' },
+  slotStatus: { fontSize: 11, fontWeight: '500' },
+  slotStatusAvailable: { color: '#6B7280' },
+  slotStatusInuse: { color: '#9CA3AF' },
+  buttonRow: { flexDirection: 'row', gap: 12 },
   backButton: {
     paddingVertical: 16,
     paddingHorizontal: 20,
     justifyContent: 'center',
   },
-  backButtonText: {fontSize: 14, color: '#3B5BDB', fontWeight: '700'},
+  backButtonText: { fontSize: 14, color: '#3B5BDB', fontWeight: '700' },
   continueButton: {
     flex: 1,
     backgroundColor: '#3B5BDB',
@@ -266,8 +282,8 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
-  continueDisabled: {opacity: 0.7},
-  continueButtonText: {color: '#FFFFFF', fontSize: 15, fontWeight: 'bold'},
+  continueDisabled: { opacity: 0.7 },
+  continueButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold' },
 });
 
 export default SlotSelectionScreen;

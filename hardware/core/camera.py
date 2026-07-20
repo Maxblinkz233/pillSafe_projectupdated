@@ -85,3 +85,17 @@ class Camera:
     @property
     def is_active(self) -> bool:
         return self._started
+
+    @property
+    def is_available(self) -> bool:
+        """Report a connected Pi camera, or an already-open development camera."""
+        if PICAMERA_AVAILABLE:
+            try:
+                return bool(Picamera2.global_camera_info())
+            except Exception:
+                return False
+        return bool(
+            self._started
+            and self._camera is not None
+            and self._camera.isOpened()
+        )

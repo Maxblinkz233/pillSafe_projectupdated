@@ -65,6 +65,20 @@ const FaceEnrollScreen = ({navigation}) => {
     }
   };
 
+  const goNextAfterFace = async () => {
+    try {
+      const status = await api.getEnrolStatus(userId);
+      if (status?.voice_enabled) {
+        navigation.navigate('VoiceEnroll');
+      } else {
+        navigation.navigate('EnrollSuccess');
+      }
+    } catch {
+      // PC / voice-off hub: face-only is enough to finish registration
+      navigation.navigate('EnrollSuccess');
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
@@ -142,7 +156,7 @@ const FaceEnrollScreen = ({navigation}) => {
             enrollState === 'done' && styles.awaitingButtonDone,
           ]}
           onPress={() => {
-            if (enrollState === 'done') navigation.navigate('VoiceEnroll');
+            if (enrollState === 'done') goNextAfterFace();
           }}
           disabled={enrollState !== 'done'}>
           <Text
@@ -151,10 +165,28 @@ const FaceEnrollScreen = ({navigation}) => {
                 ? styles.awaitingTextDone
                 : styles.awaitingText
             }>
-            {enrollState === 'done' ? 'NEXT: VOICE →' : 'AWAITING FACE ENROL'}
+            {enrollState === 'done' ? 'CONTINUE →' : 'AWAITING FACE ENROL'}
           </Text>
         </TouchableOpacity>
       </View>
+
+      {enrollState === 'done' && (
+        <TouchableOpacity style={styles.skipLink} onPress={goNextAfterFace}>
+          <Text style={styles.skipLinkText}>
+            Voice is optional on PC — continue when face is enrolled
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {(enrollState === 'error' || enrollState === 'ready') && (
+        <TouchableOpacity
+          style={styles.skipFaceButton}
+          onPress={() => navigation.navigate('EnrollSuccess')}>
+          <Text style={styles.skipFaceText}>
+            SKIP BIOMETRICS FOR NOW →
+          </Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 };
@@ -274,6 +306,27 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   awaitingTextDone: {fontSize: 14, color: '#FFFFFF', fontWeight: 'bold'},
+  skipLink: {alignItems: 'center', marginTop: 16, paddingHorizontal: 12},
+  skipLinkText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  skipFaceButton: {
+    marginTop: 12,
+    borderWidth: 1.5,
+    borderColor: '#3B5BDB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  skipFaceText: {
+    color: '#3B5BDB',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
 });
 
 export default FaceEnrollScreen;

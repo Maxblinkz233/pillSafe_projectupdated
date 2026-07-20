@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -17,8 +17,8 @@ import {
   Battery,
   ChevronLeft,
 } from 'lucide-react-native';
-import {useFocusEffect} from '@react-navigation/native';
-import {getApiConfig} from '../../services/config';
+import { useFocusEffect } from '@react-navigation/native';
+import { getApiConfig } from '../../services/config';
 import {
   api,
   formatRelativeTime,
@@ -26,7 +26,7 @@ import {
   notificationTypeLabel,
 } from '../../services/api';
 
-const AlertsScreen = ({navigation}) => {
+const AlertsScreen = ({ navigation }) => {
   const [activeFilter, setActiveFilter] = useState('All');
   const [userName, setUserName] = useState('Patient');
   const [alerts, setAlerts] = useState([]);
@@ -39,7 +39,12 @@ const AlertsScreen = ({navigation}) => {
     try {
       const cfg = await getApiConfig();
       setUserName(cfg.userName || 'Patient');
-      const rows = await api.getNotifications(cfg.userId);
+      const [rows, enrolStatus] = await Promise.all([
+        api.getNotifications(cfg.userId),
+        cfg.userId
+          ? api.getEnrolStatus(cfg.userId)
+          : Promise.resolve({ face_enrolled: true, voice_enrolled: true }),
+      ]);
       const mapped = (rows || []).map(n => ({
         id: String(n.notification_id),
         notificationId: n.notification_id,
@@ -50,6 +55,30 @@ const AlertsScreen = ({navigation}) => {
         time: formatRelativeTime(n.created_at),
         isNew: !n.is_read,
       }));
+      if (!enrolStatus?.voice_enrolled) {
+        mapped.unshift({
+          id: 'voice-enrolment-required',
+          apiType: 'ENROL_VOICE',
+          type: 'ENROLMENT REQUIRED',
+          title: 'Complete voice enrolment',
+          message:
+            'Voice verification is not ready. Open this alert to enrol on the hub.',
+          time: 'Pending',
+          isNew: true,
+        });
+      }
+      if (!enrolStatus?.face_enrolled) {
+        mapped.unshift({
+          id: 'face-enrolment-required',
+          apiType: 'ENROL_FACE',
+          type: 'ENROLMENT REQUIRED',
+          title: 'Complete face enrolment',
+          message:
+            'Face verification is not ready. Open this alert to enrol on the hub.',
+          time: 'Pending',
+          isNew: true,
+        });
+      }
       setAlerts(mapped);
       setError('');
     } catch (err) {
@@ -76,6 +105,7 @@ const AlertsScreen = ({navigation}) => {
     if (type === 'REMINDER') return '#3B5BDB';
     if (type === 'LOW INVENTORY') return '#F59E0B';
     if (type === 'DEVICE ALERT') return '#F59E0B';
+    if (type === 'ENROLMENT REQUIRED') return '#F59E0B';
     return '#6B7280';
   };
 
@@ -90,7 +120,11 @@ const AlertsScreen = ({navigation}) => {
     if (type === 'REMINDER' || type === 'IDENTITY VERIFIED') {
       return <Shield size={16} color={color} />;
     }
-    if (type === 'DEVICE ALERT' || type === 'LOW INVENTORY') {
+    if (
+      type === 'DEVICE ALERT' ||
+      type === 'LOW INVENTORY' ||
+      type === 'ENROLMENT REQUIRED'
+    ) {
       return <Battery size={16} color={color} />;
     }
     return <Bell size={16} color={color} />;
@@ -111,7 +145,7 @@ const AlertsScreen = ({navigation}) => {
         });
 
   const markAllRead = async () => {
-    const unread = alerts.filter(a => a.isNew);
+    const unread = alerts.filter(a => a.isNew && a.notificationId != null);
     await Promise.all(
       unread.map(a =>
         api.markNotificationRead(a.notificationId).catch(() => null),
@@ -121,6 +155,14 @@ const AlertsScreen = ({navigation}) => {
   };
 
   const markOneRead = async alert => {
+    if (alert.apiType === 'ENROL_FACE') {
+      navigation.navigate('FaceEnroll');
+      return;
+    }
+    if (alert.apiType === 'ENROL_VOICE') {
+      navigation.navigate('VoiceEnroll');
+      return;
+    }
     if (!alert.isNew) return;
     try {
       await api.markNotificationRead(alert.notificationId);
@@ -138,7 +180,8 @@ const AlertsScreen = ({navigation}) => {
         <View style={styles.headerLeft}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => navigation.goBack()}>
+            onPress={() => navigation.goBack()}
+          >
             <ChevronLeft size={22} color="#374151" />
           </TouchableOpacity>
           <View style={styles.headerUser}>
@@ -167,7 +210,8 @@ const AlertsScreen = ({navigation}) => {
               load();
             }}
           />
-        }>
+        }
+      >
         <View style={styles.titleRow}>
           <Text style={styles.title}>Alerts & Notifications</Text>
           <TouchableOpacity onPress={markAllRead}>
@@ -186,7 +230,8 @@ const AlertsScreen = ({navigation}) => {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.filtersContainer}>
+          style={styles.filtersContainer}
+        >
           {filters.map(filter => (
             <TouchableOpacity
               key={filter}
@@ -194,12 +239,14 @@ const AlertsScreen = ({navigation}) => {
                 styles.filterChip,
                 activeFilter === filter && styles.filterChipActive,
               ]}
-              onPress={() => setActiveFilter(filter)}>
+              onPress={() => setActiveFilter(filter)}
+            >
               <Text
                 style={[
                   styles.filterText,
                   activeFilter === filter && styles.filterTextActive,
-                ]}>
+                ]}
+              >
                 {filter}
               </Text>
             </TouchableOpacity>
@@ -207,26 +254,30 @@ const AlertsScreen = ({navigation}) => {
         </ScrollView>
 
         {loading ? (
-          <ActivityIndicator color="#3B5BDB" style={{marginVertical: 24}} />
+          <ActivityIndicator color="#3B5BDB" style={{ marginVertical: 24 }} />
         ) : filteredAlerts.length === 0 ? (
-          <Text style={styles.emptyText}>No notifications from the hub yet.</Text>
+          <Text style={styles.emptyText}>
+            No notifications from the hub yet.
+          </Text>
         ) : (
           filteredAlerts.map(alert => (
             <TouchableOpacity
               key={alert.id}
               style={[
                 styles.alertCard,
-                {borderLeftColor: getAlertColor(alert.type)},
+                { borderLeftColor: getAlertColor(alert.type) },
               ]}
-              onPress={() => markOneRead(alert)}>
+              onPress={() => markOneRead(alert)}
+            >
               <View style={styles.alertTop}>
                 <View style={styles.alertTypeRow}>
                   {getAlertIcon(alert.type)}
                   <Text
                     style={[
                       styles.alertType,
-                      {color: getAlertColor(alert.type)},
-                    ]}>
+                      { color: getAlertColor(alert.type) },
+                    ]}
+                  >
                     {alert.type}
                   </Text>
                 </View>
@@ -244,7 +295,8 @@ const AlertsScreen = ({navigation}) => {
                 <View style={styles.alertActions}>
                   <TouchableOpacity
                     style={styles.markTakenButton}
-                    onPress={() => navigation.navigate('Verify')}>
+                    onPress={() => navigation.navigate('Verify')}
+                  >
                     <Text style={styles.markTakenText}>Verify Now</Text>
                   </TouchableOpacity>
                 </View>
@@ -255,7 +307,7 @@ const AlertsScreen = ({navigation}) => {
           ))
         )}
 
-        <View style={{height: 30}} />
+        <View style={{ height: 30 }} />
       </ScrollView>
     </View>
   );
@@ -287,7 +339,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -404,7 +456,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderLeftWidth: 4,
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,

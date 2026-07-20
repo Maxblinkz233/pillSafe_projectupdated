@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,9 @@ import {
   StyleSheet,
   StatusBar,
   Switch,
+  TextInput,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import {
   ChevronLeft,
@@ -23,15 +26,33 @@ import {
   Info,
   CheckCircle,
 } from 'lucide-react-native';
+import { api } from '../../services/api';
+import { getApiConfig, saveApiConfig } from '../../services/config';
 
 const screenContent = {
   Security: {
     icon: <Shield size={24} color="#3B5BDB" />,
-    description: 'Manage your account security settings and authentication methods.',
+    description:
+      'Manage your account security settings and authentication methods.',
     toggles: [
-      { id: 'biometric', label: 'Biometric Login', subtitle: 'Use face ID to log in', default: true },
-      { id: 'twoFactor', label: 'Two-Factor Authentication', subtitle: 'Extra layer of security', default: false },
-      { id: 'autoLock', label: 'Auto Lock', subtitle: 'Lock app after 5 minutes', default: true },
+      {
+        id: 'biometric',
+        label: 'Biometric Login',
+        subtitle: 'Use face ID to log in',
+        default: true,
+      },
+      {
+        id: 'twoFactor',
+        label: 'Two-Factor Authentication',
+        subtitle: 'Extra layer of security',
+        default: false,
+      },
+      {
+        id: 'autoLock',
+        label: 'Auto Lock',
+        subtitle: 'Lock app after 5 minutes',
+        default: true,
+      },
     ],
     info: [
       { label: 'Last Login', value: 'Today, 08:32 AM' },
@@ -43,33 +64,65 @@ const screenContent = {
     icon: <Lock size={24} color="#3B5BDB" />,
     description: 'Control your data and privacy preferences.',
     toggles: [
-      { id: 'dataSharing', label: 'Data Sharing', subtitle: 'Share usage data to improve app', default: false },
-      { id: 'analytics', label: 'Analytics', subtitle: 'Allow anonymous analytics', default: true },
-      { id: 'crashReports', label: 'Crash Reports', subtitle: 'Send crash reports automatically', default: true },
+      {
+        id: 'dataSharing',
+        label: 'Data Sharing',
+        subtitle: 'Share usage data to improve app',
+        default: false,
+      },
+      {
+        id: 'analytics',
+        label: 'Analytics',
+        subtitle: 'Allow anonymous analytics',
+        default: true,
+      },
+      {
+        id: 'crashReports',
+        label: 'Crash Reports',
+        subtitle: 'Send crash reports automatically',
+        default: true,
+      },
     ],
     info: [
       { label: 'Data Stored', value: 'Encrypted locally' },
-      { label: 'Policy Version', value: 'v2.1 (2024)' },
+      { label: 'Policy Version', value: 'v2.1 (2026)' },
     ],
   },
   'Linked Devices': {
     icon: <Smartphone size={24} color="#3B5BDB" />,
     description: 'Manage devices linked to your PillSafe account.',
     toggles: [],
-    devices: [
-      { name: 'PillSafe Hub V2', status: 'Connected', type: 'Primary Dispenser' },
-      { name: 'Android Phone', status: 'This device', type: 'Mobile App' },
-    ],
+    devices: [],
     info: [],
   },
   'Push Alerts': {
     icon: <Bell size={24} color="#3B5BDB" />,
     description: 'Configure push notification preferences.',
     toggles: [
-      { id: 'missedDose', label: 'Missed Dose Alerts', subtitle: 'Get notified when a dose is missed', default: true },
-      { id: 'dispensed', label: 'Dose Dispensed', subtitle: 'Notify when medication is dispensed', default: true },
-      { id: 'reminders', label: 'Upcoming Reminders', subtitle: '15 min before scheduled dose', default: true },
-      { id: 'deviceAlerts', label: 'Device Alerts', subtitle: 'Battery low, offline alerts', default: true },
+      {
+        id: 'missedDose',
+        label: 'Missed Dose Alerts',
+        subtitle: 'Get notified when a dose is missed',
+        default: true,
+      },
+      {
+        id: 'dispensed',
+        label: 'Dose Dispensed',
+        subtitle: 'Notify when medication is dispensed',
+        default: true,
+      },
+      {
+        id: 'reminders',
+        label: 'Upcoming Reminders',
+        subtitle: '15 min before scheduled dose',
+        default: true,
+      },
+      {
+        id: 'deviceAlerts',
+        label: 'Device Alerts',
+        subtitle: 'Battery low, offline alerts',
+        default: true,
+      },
     ],
     info: [],
   },
@@ -77,34 +130,66 @@ const screenContent = {
     icon: <MessageSquare size={24} color="#3B5BDB" />,
     description: 'Manage SMS notification settings.',
     toggles: [
-      { id: 'smsEnabled', label: 'SMS Notifications', subtitle: 'Enable SMS alerts', default: true },
-      { id: 'smsMissed', label: 'Missed Dose SMS', subtitle: 'Send SMS when dose is missed', default: true },
-      { id: 'smsCaregiver', label: 'Caregiver SMS', subtitle: 'Notify caregiver via SMS', default: true },
+      {
+        id: 'smsEnabled',
+        label: 'SMS Notifications',
+        subtitle: 'Enable SMS alerts',
+        default: true,
+      },
+      {
+        id: 'smsMissed',
+        label: 'Missed Dose SMS',
+        subtitle: 'Send SMS when dose is missed',
+        default: true,
+      },
+      {
+        id: 'smsCaregiver',
+        label: 'Caregiver SMS',
+        subtitle: 'Notify caregiver via SMS',
+        default: true,
+      },
     ],
-    info: [
-      { label: 'Phone Number', value: '+233 XX XXX XXXX' },
-      { label: 'SMS Sent Today', value: '2' },
-    ],
+    info: [{ label: 'Caregiver Number', value: 'Not set' }],
   },
   'Caregiver Alerts': {
     icon: <Radio size={24} color="#3B5BDB" />,
     description: 'Configure alerts sent to your caregiver.',
     toggles: [
-      { id: 'caregiverMissed', label: 'Missed Dose Alert', subtitle: 'Alert caregiver on missed dose', default: true },
-      { id: 'caregiverVerify', label: 'Verification Failed', subtitle: 'Alert when face verification fails', default: true },
-      { id: 'caregiverBattery', label: 'Battery Low', subtitle: 'Alert when device battery is low', default: false },
+      {
+        id: 'caregiverMissed',
+        label: 'Missed Dose Alert',
+        subtitle: 'Alert caregiver on missed dose',
+        default: true,
+      },
+      {
+        id: 'caregiverVerify',
+        label: 'Verification Failed',
+        subtitle: 'Alert when face verification fails',
+        default: true,
+      },
+      {
+        id: 'caregiverBattery',
+        label: 'Battery Low',
+        subtitle: 'Alert when device battery is low',
+        default: false,
+      },
     ],
     info: [
-      { label: 'Caregiver', value: 'Sarah Mitchell' },
-      { label: 'Contact', value: '+233 XX XXX XXXX' },
-      { label: 'Alerts Sent', value: '2 this week' },
+      { label: 'Caregiver', value: 'Not set' },
+      { label: 'Contact', value: 'Not set' },
     ],
   },
   'Device Calibration': {
     icon: <Settings size={24} color="#3B5BDB" />,
-    description: 'Calibrate your PillSafe dispenser for accurate medication delivery.',
+    description:
+      'Calibrate your PillSafe dispenser for accurate medication delivery.',
     toggles: [
-      { id: 'autoCalibrate', label: 'Auto Calibration', subtitle: 'Calibrate automatically on startup', default: true },
+      {
+        id: 'autoCalibrate',
+        label: 'Auto Calibration',
+        subtitle: 'Calibrate automatically on startup',
+        default: true,
+      },
     ],
     info: [
       { label: 'Last Calibration', value: 'Yesterday, 06:00 AM' },
@@ -117,7 +202,12 @@ const screenContent = {
     icon: <Wifi size={24} color="#3B5BDB" />,
     description: 'Configure Wi-Fi connection for your PillSafe Hub.',
     toggles: [
-      { id: 'autoConnect', label: 'Auto Connect', subtitle: 'Automatically connect to saved networks', default: true },
+      {
+        id: 'autoConnect',
+        label: 'Auto Connect',
+        subtitle: 'Automatically connect to saved networks',
+        default: true,
+      },
     ],
     info: [
       { label: 'Network', value: 'Home Wi-Fi' },
@@ -131,10 +221,22 @@ const screenContent = {
     description: 'Find answers to common questions about PillSafe.',
     toggles: [],
     faqs: [
-      { q: 'How does facial verification work?', a: 'PillSafe uses the Pi camera to scan your face and match it against your enrolled biometric data.' },
-      { q: 'What if face verification fails?', a: 'You can use voice verification as an alternative or contact your caregiver for manual override.' },
-      { q: 'How do I add a new medication?', a: 'Go to Schedule tab and tap the + Add Med button to add a new medication.' },
-      { q: 'How do I change my caregiver?', a: 'Go to Settings > Caregiver Alerts to update your caregiver contact information.' },
+      {
+        q: 'How does facial verification work?',
+        a: 'PillSafe uses the Pi camera to scan your face and match it against your enrolled biometric data.',
+      },
+      {
+        q: 'What if face verification fails?',
+        a: 'You can use voice verification as an alternative or contact your caregiver for manual override.',
+      },
+      {
+        q: 'How do I add a new medication?',
+        a: 'Go to Schedule tab and tap the + Add Med button to add a new medication.',
+      },
+      {
+        q: 'How do I change my caregiver?',
+        a: 'Go to Settings > Caregiver Alerts to update your caregiver contact information.',
+      },
     ],
     info: [],
   },
@@ -154,13 +256,8 @@ const screenContent = {
     description: 'Information about the PillSafe application.',
     toggles: [],
     info: [
-      { label: 'App Version', value: '1.0.0' },
-      { label: 'Build', value: '2024.1.0' },
-      { label: 'Platform', value: 'React Native' },
-      { label: 'Backend', value: 'Flask + SQLite' },
-      { label: 'Face Model', value: 'MobileFaceNet TFLite' },
-      { label: 'Developer', value: 'Maxwell' },
-      { label: 'Institution', value: 'Final Year Project' },
+      { label: 'App Version', value: '0.0.1' },
+      { label: 'Build', value: '2026.1.0' },
     ],
   },
 };
@@ -168,12 +265,112 @@ const screenContent = {
 const SettingsDetailScreen = ({ navigation, route }) => {
   const { title } = route.params;
   const content = screenContent[title];
+  const [info, setInfo] = useState(content.info || []);
+  const [devices, setDevices] = useState(content.devices || []);
+  const [userId, setUserId] = useState(null);
+  const [caregiverName, setCaregiverName] = useState('');
+  const [caregiverPhone, setCaregiverPhone] = useState('');
+  const [saving, setSaving] = useState(false);
   const [toggles, setToggles] = useState(
-    content.toggles.reduce((acc, t) => ({ ...acc, [t.id]: t.default }), {})
+    content.toggles.reduce((acc, t) => ({ ...acc, [t.id]: t.default }), {}),
   );
 
   const toggleSwitch = id => {
     setToggles(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const cfg = await getApiConfig();
+        if (!active) return;
+        setUserId(cfg.userId);
+
+        let user = null;
+        if (cfg.userId) {
+          user = await api.getUser(cfg.userId);
+        }
+        if (!active) return;
+
+        const name = user?.caregiver_name || cfg.caregiverName || '';
+        const phone = user?.caregiver_phone || cfg.caregiverPhone || '';
+        setCaregiverName(name);
+        setCaregiverPhone(phone);
+
+        if (title === 'SMS Notifications') {
+          setInfo([{ label: 'Caregiver Number', value: phone || 'Not set' }]);
+        } else if (title === 'Caregiver Alerts') {
+          setInfo([
+            { label: 'Caregiver', value: name || 'Not set' },
+            { label: 'Contact', value: phone || 'Not set' },
+          ]);
+        } else if (title === 'Linked Devices') {
+          const health = await api.health();
+          if (!active) return;
+          const status = health?.devices || {};
+          const rows = [
+            ['Raspberry Pi Hub', 'pi_hub', 'Primary controller'],
+            ['SIM800C GSM', 'gsm', 'SMS module'],
+            ['DS3231 RTC', 'rtc', 'Real-time clock'],
+            ['Camera', 'camera', 'Face verification'],
+            ['Microphone', 'microphone', 'Voice verification'],
+          ].map(([nameValue, key, type]) => ({
+            name: nameValue,
+            type,
+            status: status[key] ? 'Connected' : 'Unavailable',
+          }));
+          setDevices(rows);
+          setInfo([
+            {
+              label: 'Available Components',
+              value: `${health?.connected_device_count || 0} / 5`,
+            },
+          ]);
+        }
+      } catch (err) {
+        if (active && title === 'Linked Devices') {
+          setInfo([{ label: 'Hub Status', value: 'Offline' }]);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [title]);
+
+  const saveCaregiver = async () => {
+    if (!caregiverName.trim() || !caregiverPhone.trim()) {
+      Alert.alert(
+        'Missing details',
+        'Enter both caregiver name and phone number.',
+      );
+      return;
+    }
+    if (!userId) {
+      Alert.alert('No patient selected', 'Connect and select a patient first.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.updateUser(userId, {
+        caregiver_name: caregiverName.trim(),
+        caregiver_phone: caregiverPhone.trim(),
+      });
+      await saveApiConfig({
+        caregiverName: updated.caregiver_name,
+        caregiverPhone: updated.caregiver_phone,
+      });
+      setInfo([
+        { label: 'Caregiver', value: updated.caregiver_name },
+        { label: 'Contact', value: updated.caregiver_phone },
+      ]);
+      Alert.alert('Updated', 'Caregiver contact saved to the hub.');
+    } catch (err) {
+      Alert.alert('Update failed', err?.message || String(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -184,7 +381,8 @@ const SettingsDetailScreen = ({ navigation, route }) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}>
+          onPress={() => navigation.goBack()}
+        >
           <ChevronLeft size={22} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{title}</Text>
@@ -193,9 +391,7 @@ const SettingsDetailScreen = ({ navigation, route }) => {
 
       {/* Title Card */}
       <View style={styles.titleCard}>
-        <View style={styles.titleIconContainer}>
-          {content.icon}
-        </View>
+        <View style={styles.titleIconContainer}>{content.icon}</View>
         <View style={styles.titleTextContainer}>
           <Text style={styles.titleText}>{title}</Text>
           <Text style={styles.descriptionText}>{content.description}</Text>
@@ -230,12 +426,47 @@ const SettingsDetailScreen = ({ navigation, route }) => {
         </View>
       )}
 
+      {title === 'Caregiver Alerts' && (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>CAREGIVER CONTACT</Text>
+          <View style={styles.sectionCard}>
+            <TextInput
+              style={styles.textInput}
+              value={caregiverName}
+              onChangeText={setCaregiverName}
+              placeholder="Caregiver name"
+              placeholderTextColor="#9CA3AF"
+            />
+            <View style={styles.divider} />
+            <TextInput
+              style={styles.textInput}
+              value={caregiverPhone}
+              onChangeText={setCaregiverPhone}
+              placeholder="+233…"
+              placeholderTextColor="#9CA3AF"
+              keyboardType="phone-pad"
+            />
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={saveCaregiver}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save caregiver</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Devices */}
-      {content.devices && content.devices.length > 0 && (
+      {devices.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>LINKED DEVICES</Text>
           <View style={styles.sectionCard}>
-            {content.devices.map((device, index) => (
+            {devices.map((device, index) => (
               <View key={index}>
                 <View style={styles.deviceRow}>
                   <View style={styles.deviceIcon}>
@@ -245,25 +476,29 @@ const SettingsDetailScreen = ({ navigation, route }) => {
                     <Text style={styles.deviceName}>{device.name}</Text>
                     <Text style={styles.deviceType}>{device.type}</Text>
                   </View>
-                  <View style={[
-                    styles.deviceStatus,
-                    device.status === 'Connected' || device.status === 'This device'
-                      ? styles.deviceStatusActive
-                      : styles.deviceStatusInactive,
-                  ]}>
-                    <Text style={[
-                      styles.deviceStatusText,
-                      device.status === 'Connected' || device.status === 'This device'
-                        ? styles.deviceStatusTextActive
-                        : styles.deviceStatusTextInactive,
-                    ]}>
+                  <View
+                    style={[
+                      styles.deviceStatus,
+                      device.status === 'Connected' ||
+                      device.status === 'This device'
+                        ? styles.deviceStatusActive
+                        : styles.deviceStatusInactive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.deviceStatusText,
+                        device.status === 'Connected' ||
+                        device.status === 'This device'
+                          ? styles.deviceStatusTextActive
+                          : styles.deviceStatusTextInactive,
+                      ]}
+                    >
                       {device.status}
                     </Text>
                   </View>
                 </View>
-                {index < content.devices.length - 1 && (
-                  <View style={styles.divider} />
-                )}
+                {index < devices.length - 1 && <View style={styles.divider} />}
               </View>
             ))}
           </View>
@@ -287,19 +522,17 @@ const SettingsDetailScreen = ({ navigation, route }) => {
       )}
 
       {/* Info */}
-      {content.info && content.info.length > 0 && (
+      {info.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>INFORMATION</Text>
           <View style={styles.sectionCard}>
-            {content.info.map((item, index) => (
+            {info.map((item, index) => (
               <View key={index}>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>{item.label}</Text>
                   <Text style={styles.infoValue}>{item.value}</Text>
                 </View>
-                {index < content.info.length - 1 && (
-                  <View style={styles.divider} />
-                )}
+                {index < info.length - 1 && <View style={styles.divider} />}
               </View>
             ))}
           </View>
@@ -514,6 +747,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#111827',
+  },
+  textInput: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: '#111827',
+  },
+  saveButton: {
+    backgroundColor: '#3B5BDB',
+    borderRadius: 10,
+    margin: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 

@@ -66,6 +66,19 @@ class VoiceRecogniser:
     def is_enrolled(self, user_id: int) -> bool:
         return is_enrolled(user_id)
 
+    @property
+    def is_available(self) -> bool:
+        return audio_input_available()
+
+
+def audio_input_available() -> bool:
+    """Return whether PortAudio exposes a usable default input device."""
+    try:
+        device = sd.query_devices(kind="input")
+        return bool(device and int(device.get("max_input_channels", 0)) > 0)
+    except Exception:
+        return False
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 

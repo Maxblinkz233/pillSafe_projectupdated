@@ -6,23 +6,26 @@ import {
   StyleSheet,
   StatusBar,
 } from 'react-native';
-import { CheckCircle } from 'lucide-react-native';
+import {CheckCircle} from 'lucide-react-native';
+import {saveApiConfig} from '../../services/config';
 
-const EnrollSuccessScreen = ({ navigation }) => {
+const EnrollSuccessScreen = ({navigation}) => {
+  const goDashboard = async () => {
+    await saveApiConfig({signedIn: true});
+    navigation.replace('MainApp');
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
-      {/* Header */}
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>M</Text>
+        <View style={styles.logoBadge}>
+          <Text style={styles.logoTextPill}>Pill</Text>
+          <Text style={styles.logoTextSafe}>Safe</Text>
         </View>
-        <Text style={styles.headerTitle}>PillSafe</Text>
-        <View style={styles.circle} />
       </View>
 
-      {/* Success Content */}
       <View style={styles.content}>
         <View style={styles.glowContainer}>
           <View style={styles.glowOuter}>
@@ -36,15 +39,12 @@ const EnrollSuccessScreen = ({ navigation }) => {
 
         <Text style={styles.title}>Enrollment Successful</Text>
         <Text style={styles.subtitle}>
-          Your dispenser is now securely linked to your profile and ready for
-          use.
+          Your dispenser profile is ready. You can enrol biometrics later from
+          Settings if you skipped them on this device.
         </Text>
       </View>
 
-      {/* Button */}
-      <TouchableOpacity
-        style={styles.dashboardButton}
-        onPress={() => navigation.replace('MainApp')}>
+      <TouchableOpacity style={styles.dashboardButton} onPress={goDashboard}>
         <Text style={styles.dashboardButtonText}>Go to Dashboard</Text>
       </TouchableOpacity>
     </View>
@@ -59,37 +59,19 @@ const styles = StyleSheet.create({
     paddingBottom: 50,
   },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingTop: 50,
     marginBottom: 20,
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  logoBadge: {
+    flexDirection: 'row',
     backgroundColor: '#3B5BDB',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#3B5BDB',
-  },
-  circle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: '#3B5BDB',
-  },
+  logoTextPill: {fontSize: 16, fontWeight: 'bold', color: '#FFFFFF'},
+  logoTextSafe: {fontSize: 16, fontWeight: 'bold', color: '#A5F3FC'},
   content: {
     flex: 1,
     alignItems: 'center',
@@ -124,7 +106,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: {width: 0, height: 4},
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 6,

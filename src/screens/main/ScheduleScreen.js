@@ -92,7 +92,9 @@ const ScheduleScreen = ({navigation}) => {
           <TouchableOpacity
             key={med.id}
             style={styles.medCard}
-            onPress={() => navigation.navigate('Verify')}>
+            onPress={() =>
+              navigation.navigate('Verify', {scheduleId: med.scheduleId})
+            }>
             <View
               style={[
                 styles.medStatusBar,
@@ -141,7 +143,9 @@ const ScheduleScreen = ({navigation}) => {
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
+        <TouchableOpacity
+          style={styles.headerLeft}
+          onPress={() => navigation.navigate('Profile')}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials(userName)}</Text>
           </View>
@@ -149,7 +153,7 @@ const ScheduleScreen = ({navigation}) => {
             <Text style={styles.patientLabel}>Patient</Text>
             <Text style={styles.userName}>{userName}</Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('Alerts')}>
           <Bell size={24} color="#374151" />
         </TouchableOpacity>
