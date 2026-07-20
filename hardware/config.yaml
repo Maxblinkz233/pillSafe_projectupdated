@@ -7,7 +7,9 @@
 face:
   confidence_threshold: 60          # Minimum confidence (0–100) to accept a match
   distance_threshold: 0.4           # Max cosine distance (= 1 − confidence/100 at threshold 60)
-  max_retries: 8
+  max_retries: 8                   # Face captures per Verify Now set
+  reject_sets_before_sms: 3         # Caregiver SMS after this many failed sets
+  reject_sets_before_lockout: 5     # Dispense lockout after this many failed sets
   sample_count: 50
   image_size: [112, 112]            # MobileFaceNet input size (H, W)
   cascade_path: "haarcascade_frontalface_default.xml"
@@ -20,7 +22,7 @@ face:
 # --- Scheduling & Dispensing ---
 schedule:
   grace_period_minutes: 15
-  poll_interval_seconds: 60
+  poll_interval_seconds: 15
 
 # --- Dispensing handshake ---
 # When require_verify_request is true the device waits for the mobile app's
@@ -29,29 +31,34 @@ schedule:
 dispense:
   require_verify_request: true
   verify_request_poll_seconds: 2
+  reminder_buzz_seconds: 30         # Re-buzz while waiting for Verify Now
+  home_after_dispense: false        # Do not home the cylinder after a dose
 
 # --- Servo Motors (one rotating cylinder per compartment) ---
-# Dispensing is rotation-only: each compartment's servo rotates the chosen
-# slot over its drop hole and the pill falls by gravity to the base.
-# There is no gate servo.
+# After successful face verification the servo rotates to the scheduled slot
+# (9 slots × 40° = 360°). The servo stays still until verification succeeds.
 servo:
   frequency_hz: 50
   num_compartments: 6
-  num_slots: 9                       # angular slots per compartment (~40° each)
+  num_slots: 9                       # angular slots per compartment (40° each)
   # One signal pin per compartment (BCM numbering). Index = compartment.
   # Avoids pins used by I2C RTC (2,3), IR sensors (23,24), buzzer (25),
   # and the I2S mic (18,19,20).
   pins: [12, 13, 16, 17, 26, 27]
   max_angle: 360                     # full rotation: 9 slots × 40° (MG996R 360°)
+  use_slot_indexing: true            # rotate to slot_index × 40° after face ACCEPTED
   min_duty: 2.5                      # duty cycle at 0° — calibrate per servo
   max_duty: 12.5                     # duty cycle at max_angle — calibrate per servo
   hold_time: 0.8                     # seconds to hold before releasing (MG996R)
 
 # --- IR Sensors ---
+# When required is false, a successful verify + servo move logs TAKEN even if
+# the IR sensors do not confirm drop/pickup (common during hardware bring-up).
 ir_sensors:
   pill_detect_pin: 23
   pill_pickup_pin: 24
   debounce_ms: 200
+  required: false
 
 # --- Buzzer ---
 buzzer:
