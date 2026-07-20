@@ -253,36 +253,44 @@ const HomeScreen = ({ navigation }) => {
           </View>
 
           <View style={styles.nextDispenseCard}>
-            <View style={styles.nextDispenseHeader}>
-              <Text style={styles.nextDispenseLabel}>NEXT DISPENSE</Text>
-              <Clock size={20} color="#A5B4FC" />
-            </View>
-            <Text style={styles.nextDispenseTime}>
-              {nextDose ? nextDose.time : '--:--'}
-            </Text>
-            <View style={styles.nextDispenseBottom}>
-              <View>
-                <Text style={styles.nextDispenseMed}>
-                  {nextDose ? nextDose.name : 'No pending dose'}
-                </Text>
-                <Text style={styles.nextDispenseSub}>
-                  {nextDose
-                    ? `${nextDose.dosage || 'Dose'} • ${nextDose.slot} • ${
-                        nextDose.status === 'missed'
-                          ? 'Missed — verify late'
-                          : nextDose.status === 'due'
-                          ? 'Due now'
-                          : 'Upcoming'
-                      }`
-                    : 'All caught up for today'}
-                </Text>
+            <TouchableOpacity
+              activeOpacity={nextDose ? 0.85 : 1}
+              disabled={!nextDose}
+              onPress={() =>
+                nextDose &&
+                navigation.navigate('Verify', {scheduleId: nextDose.scheduleId})
+              }>
+              <View style={styles.nextDispenseHeader}>
+                <Text style={styles.nextDispenseLabel}>NEXT DISPENSE</Text>
+                <Clock size={20} color="#A5B4FC" />
               </View>
-              {nextDose && (
-                <View style={styles.slotBadge}>
-                  <Text style={styles.slotBadgeText}>{nextDose.slot}</Text>
+              <Text style={styles.nextDispenseTime}>
+                {nextDose ? nextDose.time : '--:--'}
+              </Text>
+              <View style={styles.nextDispenseBottom}>
+                <View>
+                  <Text style={styles.nextDispenseMed}>
+                    {nextDose ? nextDose.name : 'No pending dose'}
+                  </Text>
+                  <Text style={styles.nextDispenseSub}>
+                    {nextDose
+                      ? `${nextDose.dosage || 'Dose'} • ${nextDose.slot} • ${
+                          nextDose.status === 'missed'
+                            ? 'Missed — verify late'
+                            : nextDose.status === 'due'
+                            ? 'Due now'
+                            : 'Upcoming'
+                        }`
+                      : 'All caught up for today'}
+                  </Text>
                 </View>
-              )}
-            </View>
+                {nextDose && (
+                  <View style={styles.slotBadge}>
+                    <Text style={styles.slotBadgeText}>{nextDose.slot}</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.scheduleHeader}>
@@ -301,7 +309,13 @@ const HomeScreen = ({ navigation }) => {
               .slice()
               .sort((a, b) => String(a.time).localeCompare(String(b.time)))
               .map(med => (
-                <View key={med.id} style={styles.medCard}>
+                <TouchableOpacity
+                  key={med.id}
+                  style={styles.medCard}
+                  activeOpacity={0.75}
+                  onPress={() =>
+                    navigation.navigate('Verify', {scheduleId: med.scheduleId})
+                  }>
                   <View
                     style={[
                       styles.medStatusBar,
@@ -357,7 +371,7 @@ const HomeScreen = ({ navigation }) => {
                       ? `Pending ${med.time}`
                       : `Missed ${med.time}`}
                   </Text>
-                </View>
+                </TouchableOpacity>
               ))
           )}
 

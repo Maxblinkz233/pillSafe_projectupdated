@@ -39,11 +39,16 @@ def _public_user(user: dict | None) -> dict | None:
 
 def create_app(db: DatabaseManager,
                enrolment_manager: EnrolmentManager | None = None,
-               rtc=None, gsm=None, camera=None) -> Flask:
+               rtc=None, gsm=None, camera=None,
+               verify_dispense_fn=None) -> Flask:
     """
     Factory function to create the Flask app with injected dependencies.
+
+    verify_dispense_fn: optional callable(user_id, schedule_id, auth_mode)
+        → dict used by POST /dispense/verify for blocking face/voice auth.
     """
     app = Flask(__name__)
+    app.config["VERIFY_DISPENSE_FN"] = verify_dispense_fn
     cfg = get_config()
     # Prefer an environment-provided token; fall back to config. Warn loudly
     # if the insecure default is still in use (FR-22).
@@ -296,6 +301,68 @@ def create_app(db: DatabaseManager,
         }
 
         return jsonify({"status": "success", "data": {"accepted": True}}), 200
+
+    @app.route("/dispense/verify", methods=["POST"])
+    @require_auth
+    def dispense_verify():
+        """
+        Blocking Verify Now: activate hub camera (or hand off to an active
+        grace-window event), run face/voice auth, then dispense on success.
+        """
+        verify_fn = app.config.get("VERIFY_DISPENSE_FN")
+        if verify_fn is None:
+            return jsonify({
+                "status": "error",
+                "error": "Verify-and-dispense is not available on this hub",
+            }), 503
+
+        body = request.get_json(silent=True) or {}
+        raw_user_id = body.get("user_id")
+        raw_schedule_id = body.get("schedule_id")
+        auth_mode = body.get("auth_mode", "face")
+
+        if auth_mode not in ("face", "voice"):
+            return jsonify({"status": "error", "error": "Invalid auth_mode"}), 400
+        if auth_mode == "voice" and not _voice_enabled():
+            return jsonify({"status": "error", "error": "Voice auth disabled"}), 503
+        if raw_user_id is None:
+            return jsonify({"status": "error", "error": "user_id required"}), 400
+
+        try:
+            user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "error": "user_id must be an integer"}), 400
+
+        schedule_id = None
+        if raw_schedule_id is not None:
+            try:
+                schedule_id = int(raw_schedule_id)
+            except (TypeError, ValueError):
+                return jsonify({"status": "error", "error": "schedule_id must be an integer"}), 400
+
+        try:
+            result = verify_fn(user_id, schedule_id, auth_mode)
+        except Exception as e:
+            logger.exception("dispense/verify failed: %s", e)
+            return jsonify({"status": "error", "error": "Verification failed on hub"}), 500
+
+        http_status = int(result.get("http_status") or (200 if result.get("ok") else 400))
+        payload = {
+            "accepted": bool(result.get("ok")),
+            "result": result.get("result"),
+            "dispensed": bool(result.get("dispensed")),
+            "confidence": result.get("confidence"),
+            "auth_mode": result.get("auth_mode", auth_mode),
+            "medication_name": result.get("medication_name"),
+            "schedule_id": schedule_id,
+        }
+        if result.get("error"):
+            if result.get("ok"):
+                payload["warning"] = result["error"]
+            else:
+                return jsonify({"status": "error", "error": result["error"], "data": payload}), http_status
+
+        return jsonify({"status": "success", "data": payload}), http_status
 
     # ── Schedule Endpoints (FR-20) ───────────────────────────
 

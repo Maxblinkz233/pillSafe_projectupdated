@@ -27,7 +27,8 @@ import os
 import sys
 import signal
 import threading
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 
 # Ensure project root is on the Python path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -118,6 +119,11 @@ class PillSafeSystem:
         self.scheduler = ScheduleController(self.db, self.rtc)
         self.scheduler.set_event_callback(self._handle_dispense_event)
 
+        # Active scheduler grace-window event (if any). Used so the app's
+        # blocking Verify Now can hand off to the camera already waiting.
+        self._active_dispense_event: DispenseEvent | None = None
+        self._active_dispense_lock = threading.Lock()
+
         # ── Step 7: Flask API ────────────────────────────────
         self.app = create_app(
             db=self.db,
@@ -125,6 +131,7 @@ class PillSafeSystem:
             rtc=self.rtc,
             gsm=self.gsm,
             camera=self.camera,
+            verify_dispense_fn=self.verify_and_dispense,
         )
 
         self._running = False
@@ -186,6 +193,9 @@ class PillSafeSystem:
                      event.grace_deadline.strftime("%H:%M:%S"))
         logger.info("=" * 40)
 
+        with self._active_dispense_lock:
+            self._active_dispense_event = event
+
         # Step 1: Notify the app + sound the buzzer to alert the user (NFR-18)
         self._notify(
             "REMINDER",
@@ -216,7 +226,264 @@ class PillSafeSystem:
             # Return to idle
             self.camera.stop()
             self.dispenser.home(event.compartment_index)
+            with self._active_dispense_lock:
+                if self._active_dispense_event is event:
+                    self._active_dispense_event = None
             logger.info("Returning to idle state")
+
+    def verify_and_dispense(
+        self,
+        user_id: int,
+        schedule_id: int | None,
+        auth_mode: str = "face",
+        timeout_seconds: float = 90.0,
+    ) -> dict:
+        """
+        App-triggered Verify Now: run face/voice auth, then dispense.
+
+        If the scheduler is already in a grace window for this user/schedule,
+        hand off to that loop (camera already running). Otherwise run an
+        on-demand verification + dispense for late / missed / manual doses.
+        """
+        with self._active_dispense_lock:
+            active = self._active_dispense_event
+
+        if active is not None:
+            if active.user_id != user_id:
+                return {
+                    "ok": False,
+                    "http_status": 409,
+                    "error": "Another patient's dose is awaiting verification",
+                    "result": "BUSY",
+                    "dispensed": False,
+                }
+            if schedule_id is not None and int(schedule_id) != active.schedule_id:
+                return {
+                    "ok": False,
+                    "http_status": 409,
+                    "error": "A different dose is currently awaiting verification on the hub",
+                    "result": "BUSY",
+                    "dispensed": False,
+                }
+            return self._handoff_to_active_event(
+                user_id=user_id,
+                schedule_id=active.schedule_id,
+                auth_mode=auth_mode,
+                timeout_seconds=timeout_seconds,
+            )
+
+        if schedule_id is None:
+            return {
+                "ok": False,
+                "http_status": 400,
+                "error": "schedule_id required when no dose is currently due on the hub",
+                "result": "MISSING_SCHEDULE",
+                "dispensed": False,
+            }
+
+        return self._on_demand_verify_dispense(
+            user_id=user_id,
+            schedule_id=int(schedule_id),
+            auth_mode=auth_mode,
+        )
+
+    def _handoff_to_active_event(
+        self,
+        user_id: int,
+        schedule_id: int,
+        auth_mode: str,
+        timeout_seconds: float,
+    ) -> dict:
+        """Queue PENDING_AUTH for the grace-window loop and wait for its result."""
+        token = uuid.uuid4().hex
+        result_event = threading.Event()
+        result_holder: dict = {}
+        self.app.config["PENDING_AUTH"] = {
+            "user_id": user_id,
+            "schedule_id": schedule_id,
+            "mode": auth_mode,
+            "token": token,
+            "result_event": result_event,
+            "result_holder": result_holder,
+        }
+
+        if not result_event.wait(timeout=timeout_seconds):
+            pending = self.app.config.get("PENDING_AUTH") or {}
+            if pending.get("token") == token:
+                self.app.config["PENDING_AUTH"] = None
+            return {
+                "ok": False,
+                "http_status": 504,
+                "error": "Hub did not complete verification in time. Stand in front of the hub camera and try again.",
+                "result": "TIMEOUT",
+                "dispensed": False,
+            }
+
+        return {
+            "ok": bool(result_holder.get("ok", False)),
+            "http_status": 200 if result_holder.get("ok") else 401,
+            "result": result_holder.get("result", "UNKNOWN"),
+            "dispensed": bool(result_holder.get("dispensed", False)),
+            "confidence": result_holder.get("confidence"),
+            "auth_mode": result_holder.get("auth_mode", auth_mode),
+            "medication_name": result_holder.get("medication_name"),
+            "error": result_holder.get("error"),
+        }
+
+    def _publish_verify_result(self, pending: dict | None, payload: dict) -> None:
+        """Signal a blocking /dispense/verify caller (if any)."""
+        if not pending:
+            return
+        holder = pending.get("result_holder")
+        event = pending.get("result_event")
+        if isinstance(holder, dict):
+            holder.clear()
+            holder.update(payload)
+        if event is not None:
+            try:
+                event.set()
+            except Exception:
+                pass
+
+    def _on_demand_verify_dispense(
+        self, user_id: int, schedule_id: int, auth_mode: str,
+    ) -> dict:
+        """Start the hub camera, verify identity, then dispense for a schedule."""
+        sched = self.db.get_schedule_with_user(schedule_id)
+        if not sched or int(sched["user_id"]) != int(user_id):
+            return {
+                "ok": False,
+                "http_status": 404,
+                "error": "Schedule not found for this user",
+                "result": "NOT_FOUND",
+                "dispensed": False,
+            }
+        if not sched.get("is_active", 1):
+            return {
+                "ok": False,
+                "http_status": 400,
+                "error": "Schedule is inactive",
+                "result": "INACTIVE",
+                "dispensed": False,
+            }
+
+        user = self.db.get_user(user_id)
+        if auth_mode == "face" and user and not user.get("enrolment_status"):
+            return {
+                "ok": False,
+                "http_status": 400,
+                "error": "Face enrolment required before verification",
+                "result": "MODEL_NOT_READY",
+                "dispensed": False,
+            }
+
+        event = DispenseEvent(
+            user_id=int(sched["user_id"]),
+            full_name=sched.get("full_name") or "Patient",
+            medication_name=sched["medication_name"],
+            compartment_index=int(sched["compartment_index"]),
+            schedule_id=int(sched["schedule_id"]),
+            scheduled_time=sched["dose_time"],
+            grace_deadline=datetime.now() + timedelta(minutes=1),
+            slot_index=int(sched.get("slot_index") or 0),
+            dosage=sched.get("dosage"),
+            pills_per_dose=int(sched.get("pills_per_dose") or 1),
+        )
+
+        with self._active_dispense_lock:
+            if self._active_dispense_event is not None:
+                return {
+                    "ok": False,
+                    "http_status": 409,
+                    "error": "Hub is busy with another dispense event",
+                    "result": "BUSY",
+                    "dispensed": False,
+                }
+            self._active_dispense_event = event
+
+        self.camera.start()
+        try:
+            logger.info(
+                "On-demand Verify Now: user %d schedule %d mode=%s",
+                user_id, schedule_id, auth_mode,
+            )
+            outcome = self.decision_engine.run_verification(
+                expected_user_id=event.user_id,
+                auth_mode=auth_mode,
+            )
+            return self._finalize_verify_outcome(event, auth_mode, outcome)
+        finally:
+            self.camera.stop()
+            try:
+                self.dispenser.home(event.compartment_index)
+            except Exception as e:
+                logger.error("Failed to home dispenser after on-demand verify: %s", e)
+            with self._active_dispense_lock:
+                if self._active_dispense_event is event:
+                    self._active_dispense_event = None
+
+    def _finalize_verify_outcome(
+        self, event: DispenseEvent, auth_mode: str, outcome,
+    ) -> dict:
+        """Map a VerificationOutcome to API payload and side effects."""
+        result_name = (
+            outcome.result.value
+            if hasattr(outcome.result, "value")
+            else str(outcome.result)
+        )
+        base = {
+            "result": result_name,
+            "confidence": outcome.confidence,
+            "auth_mode": auth_mode,
+            "medication_name": event.medication_name,
+            "schedule_id": event.schedule_id,
+        }
+
+        if outcome.result == VerificationResult.ACCEPTED:
+            dispensed = self._perform_dispense(event, auth_mode=auth_mode)
+            return {
+                **base,
+                "ok": True,
+                "http_status": 200,
+                "dispensed": dispensed,
+                "error": None if dispensed else "Verified but dispensing failed",
+            }
+
+        if outcome.result == VerificationResult.REJECTED:
+            self._log_and_alert_rejected(event, auth_mode=auth_mode)
+            return {
+                **base,
+                "ok": False,
+                "http_status": 401,
+                "dispensed": False,
+                "error": "Face did not match the enrolled patient",
+            }
+
+        if outcome.result == VerificationResult.NO_FACE:
+            return {
+                **base,
+                "ok": False,
+                "http_status": 400,
+                "dispensed": False,
+                "error": "No face detected — stand in front of the hub camera and try again",
+            }
+
+        if outcome.result == VerificationResult.MODEL_NOT_READY:
+            return {
+                **base,
+                "ok": False,
+                "http_status": 400,
+                "dispensed": False,
+                "error": "Face model not ready — complete face enrolment first",
+            }
+
+        return {
+            **base,
+            "ok": False,
+            "http_status": 400,
+            "dispensed": False,
+            "error": f"Verification incomplete ({result_name})",
+        }
 
     # ── Verification strategies ──────────────────────────────
 
@@ -245,8 +512,9 @@ class PillSafeSystem:
     def _run_verify_now_loop(self, event: DispenseEvent) -> None:
         """
         Wait for the mobile app to send a "Verify Now" request
-        (POST /dispense/request), then authenticate in the chosen mode.
-        Repeats until success, hard rejection, or the grace deadline (FR-16).
+        (POST /dispense/request or /dispense/verify), then authenticate
+        in the chosen mode. Repeats until success, hard rejection, or the
+        grace deadline (FR-16).
         """
         import time
 
@@ -273,14 +541,50 @@ class PillSafeSystem:
 
             if outcome.result == VerificationResult.ACCEPTED:
                 logger.info("User %d verified — dispensing medication", event.user_id)
-                self._perform_dispense(event, auth_mode=auth_mode)
+                dispensed = self._perform_dispense(event, auth_mode=auth_mode)
+                self._publish_verify_result(pending, {
+                    "ok": True,
+                    "result": VerificationResult.ACCEPTED.value,
+                    "dispensed": dispensed,
+                    "confidence": outcome.confidence,
+                    "auth_mode": auth_mode,
+                    "medication_name": event.medication_name,
+                    "error": None if dispensed else "Verified but dispensing failed",
+                })
                 return
             if outcome.result == VerificationResult.REJECTED:
                 self._log_and_alert_rejected(event, auth_mode=auth_mode)
+                self._publish_verify_result(pending, {
+                    "ok": False,
+                    "result": VerificationResult.REJECTED.value,
+                    "dispensed": False,
+                    "confidence": outcome.confidence,
+                    "auth_mode": auth_mode,
+                    "medication_name": event.medication_name,
+                    "error": "Face did not match the enrolled patient",
+                })
                 return
             # NO_FACE / model-not-ready / audio error → let the user try again
+            result_name = (
+                outcome.result.value
+                if hasattr(outcome.result, "value")
+                else str(outcome.result)
+            )
             logger.info("Verification incomplete (%s) — awaiting another Verify Now",
                         outcome.result)
+            self._publish_verify_result(pending, {
+                "ok": False,
+                "result": result_name,
+                "dispensed": False,
+                "confidence": outcome.confidence,
+                "auth_mode": auth_mode,
+                "medication_name": event.medication_name,
+                "error": (
+                    "No face detected — stand in front of the hub camera and try again"
+                    if outcome.result == VerificationResult.NO_FACE
+                    else f"Verification incomplete ({result_name})"
+                ),
+            })
             time.sleep(poll)
 
         # Grace deadline reached with no successful verification

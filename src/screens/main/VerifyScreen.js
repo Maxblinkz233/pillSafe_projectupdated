@@ -116,16 +116,26 @@ const VerifyScreen = ({navigation, route}) => {
     setVerifyState('scanning');
     setErrorMessage('');
     try {
-      await api.dispenseRequest({
+      const result = await api.verifyAndDispense({
         userId,
         scheduleId: selectedDose.scheduleId,
         authMode: 'face',
       });
+      if (!result?.accepted) {
+        throw new Error(
+          result?.error ||
+            'Face verification failed. Stand in front of the hub camera and try again.',
+        );
+      }
       setLastResult({
-        mode: 'face',
-        medication: selectedDose.name || 'Scheduled dose',
+        mode: result?.auth_mode || 'face',
+        medication:
+          result?.medication_name || selectedDose.name || 'Scheduled dose',
         dosage: selectedDose.dosage || '',
         scheduleId: selectedDose.scheduleId,
+        dispensed: Boolean(result?.dispensed),
+        confidence: result?.confidence,
+        hubResult: result?.result,
       });
       setVerifyState('success');
       setTimeout(loadMeta, 4000);
@@ -288,8 +298,8 @@ const ScanningState = () => (
 
     <Text style={styles.scanningTitle}>Verify & Dispense</Text>
     <Text style={styles.scanningSubtitle}>
-      Verification is performed by the hub camera.{'\n'}
-      Your app sent Verify Now to start capture.
+      Look at the hub camera now.{'\n'}
+      PillSafe is matching your face before dispensing.
     </Text>
 
     <View style={styles.scanCircleOuter}>
@@ -303,15 +313,15 @@ const ScanningState = () => (
     <View style={styles.stepsList}>
       <StepItem
         icon={<CheckCircle size={22} color="#10B981" />}
-        title="Request accepted"
-        subtitle="POST /dispense/request acknowledged"
+        title="Verify Now sent"
+        subtitle="Waiting for the hub camera to capture"
         status="done"
       />
       <View style={styles.stepDivider} />
       <StepItem
         icon={<RefreshCw size={22} color="#3B5BDB" />}
-        title="Matching embeddings"
-        subtitle="Hub FaceNet verifying scheduled patient..."
+        title="Matching face"
+        subtitle="Hub FaceNet verifying the scheduled patient..."
         status="active"
       />
       <View style={styles.stepDivider} />
@@ -354,17 +364,24 @@ const SuccessState = ({onDone, userName, result}) => (
       <View style={styles.successCircle}>
         <CheckCircle size={50} color="#FFFFFF" />
       </View>
-      <Text style={styles.successTitle}>Verify Now Sent</Text>
+      <Text style={styles.successTitle}>
+        {result?.dispensed ? 'Dose Dispensed' : 'Identity Verified'}
+      </Text>
       <Text style={styles.successSub}>
-        Welcome, {userName}. The hub is authenticating and dispensing.
+        {result?.dispensed
+          ? `Welcome, ${userName}. Collect your medication from the tray.`
+          : `Welcome, ${userName}. Face matched — check the hub tray.`}
       </Text>
     </View>
 
     <View style={styles.verificationLogs}>
       <Text style={styles.logsTitle}>VERIFICATION LOGS</Text>
-      <LogItem label="API request" status="ACCEPTED" />
+      <LogItem label="Face match" status={result?.hubResult || 'ACCEPTED'} />
       <LogItem label="Auth mode" status={(result?.mode || 'face').toUpperCase()} />
-      <LogItem label="Hub pipeline" status="RUNNING" />
+      <LogItem
+        label="Dispense"
+        status={result?.dispensed ? 'COMPLETE' : 'CHECK HUB'}
+      />
     </View>
 
     <View style={styles.currentBatch}>

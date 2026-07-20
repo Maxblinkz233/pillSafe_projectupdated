@@ -111,11 +111,17 @@ const VoiceVerifyScreen = ({navigation, route}) => {
       stopWave();
       setVoiceState('processing');
       try {
-        await api.dispenseRequest({
+        const result = await api.verifyAndDispense({
           userId,
           scheduleId,
           authMode: 'voice',
         });
+        if (!result?.accepted) {
+          throw new Error(
+            result?.error ||
+              'Voice verification failed. Speak clearly toward the hub mic and try again.',
+          );
+        }
         setTranscript('');
         setVoiceState('success');
       } catch (err) {

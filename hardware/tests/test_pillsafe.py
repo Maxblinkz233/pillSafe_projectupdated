@@ -158,6 +158,88 @@ def test_auth_api_never_exposes_password_hash(db):
     assert "password_hash" not in user
 
 
+def test_dispense_verify_requires_service(db):
+    from api.routes import create_app
+
+    app = create_app(db)  # no verify_dispense_fn
+    client = app.test_client()
+    headers = {
+        "Authorization": f"Bearer {get_config().api.token}",
+        "Content-Type": "application/json",
+    }
+    response = client.post(
+        "/dispense/verify",
+        headers=headers,
+        json={"user_id": 1, "schedule_id": 1, "auth_mode": "face"},
+    )
+    assert response.status_code == 503
+
+
+def test_dispense_verify_returns_hub_result(db):
+    from api.routes import create_app
+
+    def fake_verify(user_id, schedule_id, auth_mode):
+        assert user_id == 7
+        assert schedule_id == 11
+        assert auth_mode == "face"
+        return {
+            "ok": True,
+            "http_status": 200,
+            "result": "ACCEPTED",
+            "dispensed": True,
+            "confidence": 0.91,
+            "auth_mode": "face",
+            "medication_name": "Metformin",
+            "error": None,
+        }
+
+    app = create_app(db, verify_dispense_fn=fake_verify)
+    client = app.test_client()
+    headers = {
+        "Authorization": f"Bearer {get_config().api.token}",
+        "Content-Type": "application/json",
+    }
+    response = client.post(
+        "/dispense/verify",
+        headers=headers,
+        json={"user_id": 7, "schedule_id": 11, "auth_mode": "face"},
+    )
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["accepted"] is True
+    assert data["dispensed"] is True
+    assert data["result"] == "ACCEPTED"
+    assert data["medication_name"] == "Metformin"
+
+
+def test_dispense_verify_propagates_rejection(db):
+    from api.routes import create_app
+
+    def fake_verify(_user_id, _schedule_id, _auth_mode):
+        return {
+            "ok": False,
+            "http_status": 401,
+            "result": "REJECTED",
+            "dispensed": False,
+            "error": "Face did not match the enrolled patient",
+        }
+
+    app = create_app(db, verify_dispense_fn=fake_verify)
+    client = app.test_client()
+    headers = {
+        "Authorization": f"Bearer {get_config().api.token}",
+        "Content-Type": "application/json",
+    }
+    response = client.post(
+        "/dispense/verify",
+        headers=headers,
+        json={"user_id": 1, "schedule_id": 2, "auth_mode": "face"},
+    )
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["error"] == "Face did not match the enrolled patient"
+    assert body["data"]["result"] == "REJECTED"
+
 def test_create_schedule_with_slot(db):
     uid = db.create_user("Ama Mensah", "+233200000000", 0)
     sid = db.create_schedule(uid, "Metformin", "08:00", slot_index=3,

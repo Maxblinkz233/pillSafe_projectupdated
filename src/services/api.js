@@ -183,6 +183,20 @@ export const api = {
       },
     }),
 
+  /**
+   * Blocking Verify Now: hub activates its camera, runs face/voice match,
+   * then dispenses. Waits for the full auth + dispense cycle.
+   */
+  verifyAndDispense: ({ userId, scheduleId, authMode = 'face' }) =>
+    request('/dispense/verify', {
+      method: 'POST',
+      body: {
+        user_id: userId,
+        ...(scheduleId != null ? { schedule_id: scheduleId } : {}),
+        auth_mode: authMode,
+      },
+    }),
+
   getVoiceChallenge: () => request('/voice/challenge'),
 
   getEnrolStatus: userId => request(`/users/${userId}/enrol/status`),
