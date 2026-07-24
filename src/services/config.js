@@ -5,97 +5,67 @@ const KEYS = {
   token: '@pillsafe/api_token',
   userId: '@pillsafe/user_id',
   userName: '@pillsafe/user_name',
-  caregiverName: '@pillsafe/caregiver_name',
-  caregiverPhone: '@pillsafe/caregiver_phone',
-  signedIn: '@pillsafe/signed_in',
 };
 
-export const DEFAULT_BASE_URL = 'http://192.168.4.1:5000';
+export const DEFAULT_BASE_URL = 'http://10.0.2.2:5000';
 export const DEFAULT_TOKEN = 'CHANGE_ME_ON_FIRST_SETUP';
 
-/**
- * Prefer single-key getItem/setItem/removeItem.
- * AsyncStorage v3 renamed multiGet→getMany / multiSet→setMany / multiRemove→removeMany,
- * and some installs leave the old multi* methods undefined ("undefined is not a function").
- */
+export function getApiBaseUrlCandidates(baseUrl = DEFAULT_BASE_URL) {
+  const normalized = String(baseUrl || '').trim().replace(/\/$/, '');
+  const seen = new Set();
+  const candidates = [];
+
+  const addCandidate = (value) => {
+    if (!value) return;
+    const normalizedValue = String(value).trim().replace(/\/$/, '');
+    if (!normalizedValue || seen.has(normalizedValue)) return;
+    seen.add(normalizedValue);
+    candidates.push(normalizedValue);
+  };
+
+  addCandidate(normalized);
+  addCandidate('http://10.0.2.2:5000');
+  addCandidate('http://192.168.4.1:5000');
+  addCandidate('http://localhost:5000');
+
+  return candidates;
+}
+
 export async function getApiConfig() {
-  const [
-    baseUrl,
-    token,
-    userId,
-    userName,
-    caregiverName,
-    caregiverPhone,
-    signedIn,
-  ] = await Promise.all([
-    AsyncStorage.getItem(KEYS.baseUrl),
-    AsyncStorage.getItem(KEYS.token),
-    AsyncStorage.getItem(KEYS.userId),
-    AsyncStorage.getItem(KEYS.userName),
-    AsyncStorage.getItem(KEYS.caregiverName),
-    AsyncStorage.getItem(KEYS.caregiverPhone),
-    AsyncStorage.getItem(KEYS.signedIn),
+  const [baseUrl, token, userId, userName] = await AsyncStorage.multiGet([
+    KEYS.baseUrl,
+    KEYS.token,
+    KEYS.userId,
+    KEYS.userName,
   ]);
 
   return {
-    baseUrl: (baseUrl || DEFAULT_BASE_URL).replace(/\/$/, ''),
-    token: token || DEFAULT_TOKEN,
-    userId: userId ? Number(userId) : null,
-    userName: userName || null,
-    caregiverName: caregiverName || null,
-    caregiverPhone: caregiverPhone || null,
-    signedIn: signedIn === '1',
+    baseUrl: (baseUrl[1] || DEFAULT_BASE_URL).replace(/\/$/, ''),
+    token: token[1] || DEFAULT_TOKEN,
+    userId: userId[1] ? Number(userId[1]) : null,
+    userName: userName[1] || null,
   };
 }
 
-export async function saveApiConfig({
-  baseUrl,
-  token,
-  userId,
-  userName,
-  caregiverName,
-  caregiverPhone,
-  signedIn,
-}) {
-  const ops = [];
+export async function saveApiConfig({baseUrl, token, userId, userName}) {
+  const pairs = [];
   if (baseUrl != null) {
-    ops.push(
-      AsyncStorage.setItem(KEYS.baseUrl, String(baseUrl).replace(/\/$/, '')),
-    );
+    pairs.push([KEYS.baseUrl, String(baseUrl).replace(/\/$/, '')]);
   }
   if (token != null) {
-    ops.push(AsyncStorage.setItem(KEYS.token, String(token)));
+    pairs.push([KEYS.token, String(token)]);
   }
   if (userId != null) {
-    ops.push(AsyncStorage.setItem(KEYS.userId, String(userId)));
+    pairs.push([KEYS.userId, String(userId)]);
   }
   if (userName != null) {
-    ops.push(AsyncStorage.setItem(KEYS.userName, String(userName)));
+    pairs.push([KEYS.userName, String(userName)]);
   }
-  if (caregiverName != null) {
-    ops.push(AsyncStorage.setItem(KEYS.caregiverName, String(caregiverName)));
-  }
-  if (caregiverPhone != null) {
-    ops.push(AsyncStorage.setItem(KEYS.caregiverPhone, String(caregiverPhone)));
-  }
-  if (signedIn != null) {
-    ops.push(AsyncStorage.setItem(KEYS.signedIn, signedIn ? '1' : '0'));
-  }
-  if (ops.length) {
-    await Promise.all(ops);
+  if (pairs.length) {
+    await AsyncStorage.multiSet(pairs);
   }
 }
 
 export async function clearSessionUser() {
-  await Promise.all([
-    AsyncStorage.removeItem(KEYS.userId),
-    AsyncStorage.removeItem(KEYS.userName),
-    AsyncStorage.removeItem(KEYS.caregiverName),
-    AsyncStorage.removeItem(KEYS.caregiverPhone),
-    AsyncStorage.removeItem(KEYS.signedIn),
-  ]);
-}
-
-export async function signOutLocal() {
-  await clearSessionUser();
+  await AsyncStorage.multiRemove([KEYS.userId, KEYS.userName]);
 }

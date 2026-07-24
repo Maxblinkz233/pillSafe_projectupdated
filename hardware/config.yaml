@@ -76,7 +76,7 @@ alerts:
 api:
   host: "0.0.0.0"
   port: 5000
-  token: "CHANGE_ME_ON_FIRST_SETUP"
+  token: "pillsafe2026max"
 
 # --- Database ---
 database:
