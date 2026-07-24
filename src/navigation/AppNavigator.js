@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, {useEffect} from 'react';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View } from 'react-native';
@@ -26,13 +26,21 @@ import MonitorScreen from '../screens/main/MonitorScreen';
 import SettingsScreen from '../screens/main/SettingsScreen';
 import AlertsScreen from '../screens/main/AlertsScreen';
 import AddMedicationScreen from '../screens/main/AddMedicationScreen';
-
-
+import {startReminderPoller} from '../services/reminderPoller';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const MainTabs = () => {
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const stop = startReminderPoller({
+      navigationRef: {current: navigation},
+    });
+    return stop;
+  }, [navigation]);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({

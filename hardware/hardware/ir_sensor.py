@@ -23,6 +23,7 @@ class IRSensorManager:
         cfg = get_config()
         self.pill_detect_pin = cfg.ir_sensors.pill_detect_pin
         self.pill_pickup_pin = cfg.ir_sensors.pill_pickup_pin
+        self.required = bool(getattr(cfg.ir_sensors, "required", False))
         self._setup_gpio()
 
     def _setup_gpio(self):

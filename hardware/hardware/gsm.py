@@ -115,7 +115,20 @@ class GSMModule:
     def send_unauthorized_alert(self, caregiver_phone: str, scheduled_time: str) -> bool:
         message = (
             f"[PillSafe ALERT] Unauthorized Access at {scheduled_time}.\n"
+            f"Face verification failed after repeated attempts.\n"
             f"Dispensing sequence locked."
+        )
+        return self.send_sms(caregiver_phone, message)
+
+    def send_taken_dose_alert(self, patient_name: str, medication_name: str,
+                               scheduled_time: str, actual_time: str,
+                               caregiver_phone: str) -> bool:
+        message = (
+            f"[PillSafe] Dose Taken\n"
+            f"Patient: {patient_name}\n"
+            f"Medication: {medication_name}\n"
+            f"Scheduled: {scheduled_time}\n"
+            f"Taken at: {actual_time}"
         )
         return self.send_sms(caregiver_phone, message)
 
