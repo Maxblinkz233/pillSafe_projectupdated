@@ -7,7 +7,10 @@ All endpoints except /health require Bearer token authentication (FR-22).
 import os
 import hmac
 import functools
-from flask import Flask, request, jsonify
+import time
+
+import cv2
+from flask import Flask, Response, jsonify, request, stream_with_context
 
 from database.db_manager import DatabaseManager
 from enrollment.enrol_user import EnrolmentManager
@@ -104,6 +107,64 @@ def create_app(db: DatabaseManager,
                                           if available),
         }
         return jsonify({"status": "success", "data": status}), 200
+
+    # ── Hub Camera Preview ───────────────────────────────────
+
+    @app.route("/camera/stream", methods=["GET"])
+    @require_auth
+    def camera_stream():
+        """Low-bandwidth MJPEG preview of the hub camera (about 8 FPS)."""
+        if camera is None:
+            return jsonify({
+                "status": "error",
+                "error": "Camera preview is not available",
+            }), 503
+
+        camera.start()
+        if not camera.is_active:
+            return jsonify({
+                "status": "error",
+                "error": "Camera could not be started",
+            }), 503
+
+        @stream_with_context
+        def generate_frames():
+            while camera.is_active:
+                frame = camera.capture_frame()
+                if frame is None:
+                    time.sleep(0.1)
+                    continue
+                encoded, jpeg = cv2.imencode(
+                    ".jpg",
+                    frame,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 70],
+                )
+                if encoded:
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Cache-Control: no-store\r\n\r\n"
+                        + jpeg.tobytes()
+                        + b"\r\n"
+                    )
+                time.sleep(0.125)
+
+        return Response(
+            generate_frames(),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
+    @app.route("/camera/preview/stop", methods=["POST"])
+    @require_auth
+    def stop_camera_preview():
+        """Release a preview camera after enrolment/verification completes."""
+        if camera is not None:
+            camera.stop()
+        return jsonify({"status": "success", "data": {"stopped": True}}), 200
 
     # ── User Endpoints (FR-19) ───────────────────────────────
 

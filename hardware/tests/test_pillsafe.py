@@ -187,6 +187,34 @@ def test_dispense_verify_requires_service(db):
     assert response.status_code == 503
 
 
+def test_camera_preview_requires_auth_and_camera(db):
+    from api.routes import create_app
+
+    app = create_app(db, camera=None)
+    client = app.test_client()
+
+    assert client.get("/camera/stream").status_code == 401
+
+    response = client.get(
+        "/camera/stream",
+        headers={"Authorization": f"Bearer {get_config().api.token}"},
+    )
+    assert response.status_code == 503
+
+
+def test_camera_preview_stop_is_idempotent(db):
+    from api.routes import create_app
+
+    app = create_app(db, camera=None)
+    client = app.test_client()
+    response = client.post(
+        "/camera/preview/stop",
+        headers={"Authorization": f"Bearer {get_config().api.token}"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["data"]["stopped"] is True
+
+
 def test_dispense_verify_returns_hub_result(db):
     from api.routes import create_app
 
