@@ -116,7 +116,7 @@ hotspot:
 
 # ── Voice Recognition (deferred until INMP441 is fitted) ───────────────────
 voice:
-  enabled: false                  # set true only after INMP441 + sounddevice/librosa work
+  enabled: true                  # set true only after INMP441 + sounddevice/librosa work
   sample_rate: 16000              # Hz — INMP441 native sample rate
   record_duration_sec: 3          # seconds recorded per utterance
   n_mfcc: 40                      # MFCC coefficient count
@@ -129,7 +129,7 @@ voice:
 # ── Hardware additions ─────────────────────────────────────────────────────
 hardware:
   i2s_mic:
-    enabled: false                # match voice.enabled until the mic is installed
+    enabled: true                # match voice.enabled until the mic is installed
     # INMP441 wiring (BCM numbering) — unused while enabled: false:
     #   SCK  → GPIO 18   (I2S bit clock)
     #   WS   → GPIO 19   (I2S word select / LRCLK)
