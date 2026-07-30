@@ -44,7 +44,7 @@ servo:
   # One signal pin per compartment (BCM numbering). Index = compartment.
   # Avoids pins used by I2C RTC (2,3), IR sensors (23,24), buzzer (25),
   # and the I2S mic (18,19,20).
-  pins: [12, 13, 16, 17, 26, 27]
+  pins: [12, 13, 22, 17, 26, 27]
   max_angle: 360                     # full rotation: 9 slots × 40° (MG996R 360°)
   use_slot_indexing: true            # rotate to slot_index × 40° after face ACCEPTED
   min_duty: 2.5                      # duty cycle at 0° — calibrate per servo
