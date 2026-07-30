@@ -295,7 +295,9 @@ const AlertsScreen = ({ navigation }) => {
                 <View style={styles.alertActions}>
                   <TouchableOpacity
                     style={styles.markTakenButton}
-                    onPress={() => navigation.navigate('Verify')}
+                    onPress={() =>
+                      navigation.navigate('MainApp', {screen: 'Verify'})
+                    }
                   >
                     <Text style={styles.markTakenText}>Verify Now</Text>
                   </TouchableOpacity>

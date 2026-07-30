@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -42,6 +42,7 @@ const VerifyScreen = ({navigation, route}) => {
   const [lastResult, setLastResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [loadingMeta, setLoadingMeta] = useState(true);
+  const verificationController = useRef(null);
 
   const loadMeta = useCallback(async () => {
     setLoadingMeta(true);
@@ -116,12 +117,16 @@ const VerifyScreen = ({navigation, route}) => {
 
     setVerifyState('scanning');
     setErrorMessage('');
+    const controller = new AbortController();
+    verificationController.current = controller;
     try {
       const result = await api.verifyAndDispense({
         userId,
         scheduleId: selectedDose.scheduleId,
         authMode: 'face',
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (!result?.accepted) {
         throw new Error(
           result?.error ||
@@ -141,11 +146,24 @@ const VerifyScreen = ({navigation, route}) => {
       setVerifyState('success');
       setTimeout(loadMeta, 4000);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setErrorMessage(err.message || String(err));
       setVerifyState('failed');
     } finally {
+      if (verificationController.current === controller) {
+        verificationController.current = null;
+      }
       api.stopCameraPreview().catch(() => {});
     }
+  };
+
+  const cancelScan = () => {
+    const controller = verificationController.current;
+    verificationController.current = null;
+    controller?.abort();
+    setVerifyState('ready');
+    setErrorMessage('');
+    api.stopCameraPreview().catch(() => {});
   };
 
   const reset = () => {
@@ -168,7 +186,9 @@ const VerifyScreen = ({navigation, route}) => {
       />
     );
   }
-  if (verifyState === 'scanning') return <ScanningState />;
+  if (verifyState === 'scanning') {
+    return <ScanningState onCancel={cancelScan} />;
+  }
   if (verifyState === 'success') {
     return <SuccessState onDone={reset} userName={userName} result={lastResult} />;
   }
@@ -290,7 +310,7 @@ const ReadyState = ({
   </ScrollView>
 );
 
-const ScanningState = () => (
+const ScanningState = ({onCancel}) => (
   <ScrollView style={styles.container}>
     <View style={styles.scanningHeader}>
       <View style={styles.avatar}>
@@ -308,6 +328,11 @@ const ScanningState = () => (
     <View style={styles.previewWrap}>
       <CameraPreview />
     </View>
+
+    <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+      <XCircle size={19} color="#991B1B" />
+      <Text style={styles.cancelButtonText}>Cancel Verification</Text>
+    </TouchableOpacity>
 
     <View style={styles.stepsList}>
       <StepItem
@@ -678,7 +703,23 @@ const styles = StyleSheet.create({
   },
   previewWrap: {
     width: '100%',
-    marginBottom: 30,
+    marginBottom: 16,
+  },
+  cancelButton: {
+    borderWidth: 1.5,
+    borderColor: '#DC2626',
+    borderRadius: 12,
+    paddingVertical: 13,
+    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  cancelButtonText: {
+    color: '#991B1B',
+    fontSize: 15,
+    fontWeight: '600',
   },
   scanCircleOuter: {
     width: 220,
