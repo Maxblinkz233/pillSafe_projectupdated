@@ -73,7 +73,9 @@ export function startReminderPoller({onReminder, navigationRef} = {}) {
             onPress: () => {
               alerting = false;
               try {
-                navigationRef?.current?.navigate?.('Verify');
+                navigationRef?.current?.navigate?.('MainApp', {
+                  screen: 'Verify',
+                });
               } catch {
                 // Navigation may not be ready
               }

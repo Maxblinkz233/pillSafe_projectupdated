@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, query } = {}) {
+async function request(path, { method = 'GET', body, query, signal } = {}) {
   const { baseUrl, token } = await getApiConfig();
   let url = `${baseUrl}${path}`;
 
@@ -41,8 +41,12 @@ async function request(path, { method = 'GET', body, query } = {}) {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
     });
   } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw err;
+    }
     throw new ApiError(
       `Cannot reach PillSafe at ${baseUrl}. Check Wi-Fi and Device Connection settings.`,
       0,
@@ -190,9 +194,10 @@ export const api = {
    * Blocking Verify Now: hub activates its camera, runs face/voice match,
    * then dispenses. Waits for the full auth + dispense cycle.
    */
-  verifyAndDispense: ({ userId, scheduleId, authMode = 'face' }) =>
+  verifyAndDispense: ({ userId, scheduleId, authMode = 'face', signal }) =>
     request('/dispense/verify', {
       method: 'POST',
+      signal,
       body: {
         user_id: userId,
         ...(scheduleId != null ? { schedule_id: scheduleId } : {}),
