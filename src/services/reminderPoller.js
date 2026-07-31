@@ -4,7 +4,7 @@ import {getApiConfig} from './config';
 import {api} from './api';
 
 const SEEN_KEY = 'pillsafe_seen_reminder_ids';
-const POLL_MS = 3000;
+const POLL_MS = 2500;
 
 async function loadSeenIds() {
   try {
@@ -25,6 +25,9 @@ async function saveSeenIds(ids) {
 /**
  * Poll hub notifications for REMINDER events and alert the phone when
  * medication time is up. Returns a stop() function.
+ *
+ * Uses local "seen" ids (not is_read) so Alerts "mark all read" cannot
+ * hide a dose-due popup before it is shown.
  */
 export function startReminderPoller({onReminder, navigationRef} = {}) {
   let stopped = false;
@@ -35,10 +38,15 @@ export function startReminderPoller({onReminder, navigationRef} = {}) {
     if (stopped || alerting) return;
     try {
       const cfg = await getApiConfig();
-      if (!cfg?.userId || !cfg?.baseUrl) return;
+      if (!cfg?.userId || !cfg?.baseUrl) {
+        return;
+      }
 
-      const notifications = await api.getNotifications(cfg.userId, true);
-      const reminders = (notifications || []).filter(n => n.type === 'REMINDER');
+      // Fetch recent notifications (read or unread) and filter locally.
+      const notifications = await api.getNotifications(cfg.userId, false);
+      const reminders = (notifications || []).filter(
+        n => String(n.type || '').toUpperCase() === 'REMINDER',
+      );
       if (!reminders.length) return;
 
       const seen = await loadSeenIds();
@@ -74,9 +82,8 @@ export function startReminderPoller({onReminder, navigationRef} = {}) {
             onPress: () => {
               alerting = false;
               try {
-                navigationRef?.current?.navigate?.('MainApp', {
-                  screen: 'Verify',
-                });
+                // MainTabs is already active — navigate to the Verify tab.
+                navigationRef?.current?.navigate?.('Verify');
               } catch {
                 // Navigation may not be ready
               }
@@ -85,8 +92,12 @@ export function startReminderPoller({onReminder, navigationRef} = {}) {
         ],
         {cancelable: true, onDismiss: () => { alerting = false; }},
       );
-    } catch {
-      // Hub offline — ignore until next poll
+    } catch (err) {
+      // Keep quiet in production UI, but leave a console trail for debugging.
+      console.warn(
+        '[PillSafe] Reminder poll failed:',
+        err?.message || String(err),
+      );
     }
   };
 

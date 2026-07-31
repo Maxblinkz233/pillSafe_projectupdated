@@ -43,15 +43,18 @@ def _public_user(user: dict | None) -> dict | None:
 def create_app(db: DatabaseManager,
                enrolment_manager: EnrolmentManager | None = None,
                rtc=None, gsm=None, camera=None,
-               verify_dispense_fn=None) -> Flask:
+               verify_dispense_fn=None,
+               dose_alert_fn=None) -> Flask:
     """
     Factory function to create the Flask app with injected dependencies.
 
     verify_dispense_fn: optional callable(user_id, schedule_id, auth_mode)
         → dict used by POST /dispense/verify for blocking face/voice auth.
+    dose_alert_fn: optional callable for POST /alerts/dose-due-test.
     """
     app = Flask(__name__)
     app.config["VERIFY_DISPENSE_FN"] = verify_dispense_fn
+    app.config["DOSE_ALERT_FN"] = dose_alert_fn
     cfg = get_config()
     # Prefer an environment-provided token; fall back to config. Warn loudly
     # if the insecure default is still in use (FR-22).
@@ -609,5 +612,32 @@ def create_app(db: DatabaseManager,
             return jsonify({"status": "success",
                             "data": {"read": notification_id}}), 200
         return jsonify({"status": "error", "error": "Notification not found"}), 404
+
+    @app.route("/alerts/dose-due-test", methods=["POST"])
+    @require_auth
+    def dose_due_test():
+        """
+        Fire the same REMINDER + buzzer used when a scheduled dose is due.
+        Body (optional): { "user_id": 2, "medication_name": "Test pill" }
+        """
+        fn = app.config.get("DOSE_ALERT_FN")
+        if fn is None:
+            return jsonify({
+                "status": "error",
+                "error": "Dose-due alert is not available on this hub",
+            }), 503
+        data = request.get_json(silent=True) or {}
+        try:
+            result = fn(
+                user_id=data.get("user_id"),
+                medication_name=str(
+                    data.get("medication_name") or "your medication"
+                ),
+                duration_seconds=data.get("duration_seconds"),
+            )
+            return jsonify({"status": "success", "data": result}), 200
+        except Exception as exc:
+            logger.exception("Dose-due test failed")
+            return jsonify({"status": "error", "error": str(exc)}), 500
 
     return app

@@ -132,8 +132,9 @@ class ScheduleController:
                 # Mark as triggered to prevent duplicates
                 self._triggered_today.add(schedule_id)
 
-                # Create DispenseEvent
-                grace_deadline = now + timedelta(minutes=self.grace_period)
+                # Grace window uses wall clock so verify loops / buzzer lifetime
+                # are not killed when RTC and Pi clocks disagree.
+                grace_deadline = datetime.now() + timedelta(minutes=self.grace_period)
                 event = DispenseEvent(
                     user_id=sched["user_id"],
                     full_name=sched["full_name"],

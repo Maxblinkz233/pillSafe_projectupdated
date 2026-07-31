@@ -137,6 +137,7 @@ class PillSafeSystem:
             gsm=self.gsm,
             camera=self.camera,
             verify_dispense_fn=self.verify_and_dispense,
+            dose_alert_fn=self.trigger_dose_due_alert,
         )
 
         self._running = False
@@ -171,7 +172,18 @@ class PillSafeSystem:
         logger.info("Flask API started on %s:%d", cfg.api.host, cfg.api.port)
 
         rtc_time = self.rtc.get_time_string("%Y-%m-%d %H:%M:%S")
-        logger.info("System ready — RTC time: %s", rtc_time)
+        sys_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.info("System ready — RTC time: %s | Pi time: %s", rtc_time, sys_time)
+        try:
+            skew = abs((self.rtc.get_time() - datetime.now()).total_seconds())
+            if skew > 120:
+                logger.warning(
+                    "RTC is %.0f seconds off from the Pi clock. "
+                    "Schedule matching uses RTC; keep them synced.",
+                    skew,
+                )
+        except Exception:
+            pass
         logger.info("Entering idle state — waiting for dispensing events...")
 
         # Keep the main thread alive
@@ -231,9 +243,8 @@ class PillSafeSystem:
                 # Autonomous timer-driven verification
                 self._run_autonomous_verification(event)
         finally:
-            # Never leave the buzzer running into/after dispense.
-            self.buzzer.stop()
-            # Return to idle — do NOT home the servo (that moves the motor).
+            # Do NOT stop the dose-due buzzer here — it must run its full
+            # 45–60 s even if Verify Now is slow. Dispense stops it explicitly.
             self.camera.stop()
             dispense_cfg = getattr(get_config(), "dispense", None)
             if (
@@ -895,9 +906,34 @@ class PillSafeSystem:
     def _notify(self, type: str, message: str, user_id: int | None = None) -> None:
         """Record an app-facing notification (best-effort)."""
         try:
-            self.db.add_notification(type, message, user_id=user_id)
+            nid = self.db.add_notification(type, message, user_id=user_id)
+            logger.info(
+                "Notification stored id=%s type=%s user=%s: %s",
+                nid, type, user_id, message,
+            )
         except Exception as e:
             logger.error("Failed to record notification (%s): %s", type, e)
+
+    def trigger_dose_due_alert(
+        self,
+        user_id: int | None = None,
+        medication_name: str = "your medication",
+        duration_seconds: float | None = None,
+    ) -> dict:
+        """
+        Manually fire the same REMINDER + buzzer used when a dose is due.
+        Useful for hardware bring-up without waiting for the schedule.
+        """
+        message = f"Time is up to take your medicine: {medication_name}"
+        self._notify("REMINDER", message, user_id=user_id)
+        self.buzzer.alert_dose_due(duration_seconds)
+        return {
+            "reminded": True,
+            "user_id": user_id,
+            "message": message,
+            "buzzer_seconds": duration_seconds
+            or getattr(get_config().buzzer, "dose_ready_duration_seconds", 50),
+        }
 
     def _wait_for_grace_period(self, event: DispenseEvent) -> None:
         """
