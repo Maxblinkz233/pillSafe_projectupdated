@@ -82,45 +82,127 @@ def audio_input_available() -> bool:
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _record(duration: float = DURATION_SEC, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
-    """Capture audio from the I2S MEMS microphone."""
-    cfg = None
+def _voice_config():
     try:
         cfg = get_config()
     except Exception:
-        cfg = None
+        return None
+    return getattr(cfg, "voice", None)
 
-    configured_device = DEVICE_INDEX
-    if cfg is not None:
-        voice_cfg = getattr(cfg, "voice", None)
-        if voice_cfg is not None and getattr(voice_cfg, "device_index", None) is not None:
-            configured_device = voice_cfg.device_index
 
-    logger.info("Recording %.1fs of audio…", duration)
+def _configured_device_index():
+    voice_cfg = _voice_config()
+    if voice_cfg is not None and getattr(voice_cfg, "device_index", None) is not None:
+        return voice_cfg.device_index
+    return DEVICE_INDEX
 
+
+def _input_device_info(device_index=None):
     try:
-        audio = sd.rec(
-            int(duration * sample_rate),
-            samplerate=sample_rate,
-            channels=1,
-            dtype="float32",
-            device=configured_device,
-        )
-        sd.wait()
-        return audio.flatten()
-    except Exception as exc:
-        if configured_device is not None:
-            logger.warning("Primary audio device unavailable, falling back to default input: %s", exc)
-            audio = sd.rec(
-                int(duration * sample_rate),
-                samplerate=sample_rate,
-                channels=1,
-                dtype="float32",
-                device=None,
-            )
-            sd.wait()
-            return audio.flatten()
-        raise
+        if device_index is None:
+            return sd.query_devices(kind="input")
+        return sd.query_devices(device_index)
+    except Exception:
+        return None
+
+
+def _candidate_capture_rates(preferred: int, device_info=None) -> list[int]:
+    """
+    ALSA on Raspberry Pi often rejects 16 kHz for I2S / USB mics and only
+    accepts 44100 or 48000. Try preferred first, then device default, then
+    common rates.
+    """
+    rates: list[int] = []
+    for rate in (
+        int(preferred),
+        int((device_info or {}).get("default_samplerate") or 0),
+        48000,
+        44100,
+        32000,
+        22050,
+        16000,
+        8000,
+    ):
+        if rate > 0 and rate not in rates:
+            rates.append(rate)
+    return rates
+
+
+def _resample_audio(audio: np.ndarray, capture_rate: int, target_rate: int) -> np.ndarray:
+    if capture_rate == target_rate or audio.size == 0:
+        return audio.astype(np.float32, copy=False)
+    return librosa.resample(
+        audio.astype(np.float32),
+        orig_sr=capture_rate,
+        target_sr=target_rate,
+    ).astype(np.float32)
+
+
+def _open_recording(
+    duration: float,
+    capture_rate: int,
+    device,
+) -> np.ndarray:
+    audio = sd.rec(
+        int(duration * capture_rate),
+        samplerate=capture_rate,
+        channels=1,
+        dtype="float32",
+        device=device,
+    )
+    sd.wait()
+    return audio.flatten()
+
+
+def _record(duration: float = DURATION_SEC, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+    """
+    Capture audio from the mic, then return samples at ``sample_rate``.
+
+    Hardware may only support 44.1/48 kHz. We negotiate a working capture
+    rate and resample so MFCC enrolment/verification stay consistent.
+    """
+    configured_device = _configured_device_index()
+    device_info = _input_device_info(configured_device)
+    rates = _candidate_capture_rates(sample_rate, device_info)
+    logger.info(
+        "Recording %.1fs of audio (analysis=%d Hz, device=%s, try rates=%s)…",
+        duration,
+        sample_rate,
+        configured_device if configured_device is not None else "default",
+        rates,
+    )
+
+    last_error = None
+    devices_to_try = [configured_device]
+    if configured_device is not None:
+        devices_to_try.append(None)
+
+    for device in devices_to_try:
+        info = _input_device_info(device) if device is not configured_device else device_info
+        for capture_rate in _candidate_capture_rates(sample_rate, info):
+            try:
+                audio = _open_recording(duration, capture_rate, device)
+                if capture_rate != sample_rate:
+                    logger.info(
+                        "Captured at %d Hz on device %s; resampling to %d Hz",
+                        capture_rate,
+                        device if device is not None else "default",
+                        sample_rate,
+                    )
+                    audio = _resample_audio(audio, capture_rate, sample_rate)
+                return audio
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Audio open failed (device=%s, rate=%d): %s",
+                    device if device is not None else "default",
+                    capture_rate,
+                    exc,
+                )
+
+    raise RuntimeError(
+        f"No usable microphone sample rate. Last error: {last_error}"
+    ) from last_error
 
 
 def _extract_mfcc(audio: np.ndarray, sample_rate: int = SAMPLE_RATE,

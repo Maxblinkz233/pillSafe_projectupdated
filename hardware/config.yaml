@@ -117,7 +117,9 @@ hotspot:
 # ── Voice Recognition (deferred until INMP441 is fitted) ───────────────────
 voice:
   enabled: true                  # set true only after INMP441 + sounddevice/librosa work
-  sample_rate: 16000              # Hz — INMP441 native sample rate
+  # Analysis rate for MFCC. Capture may use 44100/48000 if ALSA rejects 16000,
+  # then audio is resampled to this rate automatically.
+  sample_rate: 16000
   record_duration_sec: 3          # seconds recorded per utterance
   n_mfcc: 40                      # MFCC coefficient count
   enrol_samples: 3                # utterances captured during enrolment
