@@ -64,7 +64,10 @@ const FaceEnrollScreen = ({navigation}) => {
       setErrorMessage(err.message || String(err));
       setStatusText('Face enrolment failed.');
     } finally {
-      api.stopCameraPreview().catch(() => {});
+      // Let CameraPreview unmount and stop polling before releasing the hub camera.
+      setTimeout(() => {
+        api.stopCameraPreview().catch(() => {});
+      }, 400);
     }
   };
 

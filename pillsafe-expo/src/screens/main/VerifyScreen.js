@@ -153,7 +153,9 @@ const VerifyScreen = ({navigation, route}) => {
       if (verificationController.current === controller) {
         verificationController.current = null;
       }
-      api.stopCameraPreview().catch(() => {});
+      setTimeout(() => {
+        api.stopCameraPreview().catch(() => {});
+      }, 400);
     }
   };
 
@@ -163,7 +165,9 @@ const VerifyScreen = ({navigation, route}) => {
     controller?.abort();
     setVerifyState('ready');
     setErrorMessage('');
-    api.stopCameraPreview().catch(() => {});
+    setTimeout(() => {
+      api.stopCameraPreview().catch(() => {});
+    }, 400);
   };
 
   const reset = () => {

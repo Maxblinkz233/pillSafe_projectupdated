@@ -194,12 +194,11 @@ def test_camera_preview_requires_auth_and_camera(db):
     client = app.test_client()
 
     assert client.get("/camera/stream").status_code == 401
+    assert client.get("/camera/snapshot").status_code == 401
 
-    response = client.get(
-        "/camera/stream",
-        headers={"Authorization": f"Bearer {get_config().api.token}"},
-    )
-    assert response.status_code == 503
+    headers = {"Authorization": f"Bearer {get_config().api.token}"}
+    assert client.get("/camera/stream", headers=headers).status_code == 503
+    assert client.get("/camera/snapshot", headers=headers).status_code == 503
 
 
 def test_camera_preview_stop_is_idempotent(db):
