@@ -1,22 +1,28 @@
 """
 PillSafe — Dispensing Mechanism Controller
 Each of the six compartments (one per patient) is a rotating cylinder with
-nine angular slots (~40° apart). Every compartment is driven by its own
-MG996R (continuous-rotation / 360° capable) servo.
+nine angular slots (40° apart). Every compartment is driven by its own
+MG996R servo.
 
-Dispensing is rotation-only: the compartment's servo rotates so the target
-slot aligns with that compartment's fixed drop hole, and the pill falls by
-gravity to the collection base. There is no gate.
+Dispensing is rotation-only: the compartment's servo rotates by one or more
+40° steps so the target slot aligns with that compartment's fixed drop hole.
 
 GPIO Wiring (BCM numbering, one signal pin per compartment):
-  - Compartment 0..5 servo signals → config servo.pins (default 12,13,16,17,26,27)
+  - Compartment 0..5 servo signals → config servo.pins
   - Each servo VCC → external 5V supply (≥5–6 A recommended for 6× MG996R)
   - Each servo GND → common GND with the Pi (and the external PSU)
 
-Calibrate min_duty / max_duty / hold_time in config.yaml per servo unit.
+Modes (config servo.mode):
+  - continuous (default): timed 40° steps. Neutral duty stops the motor.
+    Use this for 360° / continuous-rotation MG996R (or modified 180° units).
+  - positional: absolute PWM angles. Use only with true position servos;
+    set servo.travel_degrees to the real mechanical range (usually 180).
 """
 
+from __future__ import annotations
+
 import time
+
 from utils.config import get_config
 from utils.logger import setup_logger
 from hardware import gpio_compat as gpio
@@ -29,18 +35,28 @@ class Dispenser:
 
     def __init__(self):
         cfg = get_config()
-        self.frequency = cfg.servo.frequency_hz
-        self.num_compartments = cfg.servo.num_compartments
-        self.num_slots = getattr(cfg.servo, "num_slots", 9)
-        self.min_duty = cfg.servo.min_duty
-        self.max_duty = cfg.servo.max_duty
-        self.hold_time = cfg.servo.hold_time
-        self.max_angle = float(getattr(cfg.servo, "max_angle", 360.0))
-        self.use_slot_indexing = bool(getattr(cfg.servo, "use_slot_indexing", True))
+        servo = cfg.servo
+        self.frequency = servo.frequency_hz
+        self.num_compartments = servo.num_compartments
+        self.num_slots = int(getattr(servo, "num_slots", 9))
+        self.min_duty = float(servo.min_duty)
+        self.max_duty = float(servo.max_duty)
+        self.hold_time = float(servo.hold_time)
+        self.angle_per_slot = float(getattr(servo, "angle_per_slot", 40.0))
+        self.mode = str(getattr(servo, "mode", "continuous")).strip().lower()
+        # Physical PWM range of a positional servo (almost always 180°).
+        self.travel_degrees = float(getattr(servo, "travel_degrees", 180.0))
+        # Continuous-rotation calibration.
+        self.neutral_duty = float(getattr(servo, "neutral_duty", 7.5))
+        self.run_duty_offset = float(getattr(servo, "run_duty_offset", 2.5))
+        self.degrees_per_second = float(
+            getattr(servo, "degrees_per_second", 50.0)
+        )
+        self.settle_time = float(getattr(servo, "settle_time", 0.15))
 
-        pins = getattr(cfg.servo, "pins", None)
+        pins = getattr(servo, "pins", None)
         if not pins:
-            legacy = getattr(cfg.servo, "pwm_pin", 18)
+            legacy = getattr(servo, "pwm_pin", 18)
             pins = [legacy]
         self.pins = list(pins)
         if len(self.pins) < self.num_compartments:
@@ -50,10 +66,16 @@ class Dispenser:
                 len(self.pins), self.num_compartments,
             )
 
-        self.angle_per_slot = self.max_angle / self.num_slots
         self._pwms: dict[int, gpio.PWM] = {}
         self._current_slot: dict[int, int] = {}
         self._setup_gpio()
+        logger.info(
+            "Dispenser mode=%s, %.1f°/slot, travel=%.0f°, dps=%.1f",
+            self.mode,
+            self.angle_per_slot,
+            self.travel_degrees,
+            self.degrees_per_second,
+        )
 
     def _setup_gpio(self) -> None:
         if not gpio.AVAILABLE:
@@ -62,11 +84,17 @@ class Dispenser:
                 gpio.BACKEND, self.pins,
             )
             return
+        # Claim each pin once via PWM only (avoid double-claim under lgpio).
         for compartment, pin in enumerate(self.pins):
-            gpio.setup_out(pin)
-            pwm = gpio.PWM(pin, self.frequency)
-            pwm.start(0)
-            self._pwms[compartment] = pwm
+            try:
+                pwm = gpio.PWM(pin, self.frequency)
+                pwm.start(0)
+                self._pwms[compartment] = pwm
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Cannot claim servo GPIO {pin} (compartment {compartment}): "
+                    f"{exc}"
+                ) from exc
         logger.info(
             "MG996R servos on GPIO %s at %d Hz [%s]",
             self.pins, self.frequency, gpio.BACKEND,
@@ -76,76 +104,168 @@ class Dispenser:
         return round(slot_index * self.angle_per_slot, 1)
 
     def _angle_to_duty(self, angle: float) -> float:
-        """Convert an angle (0–max_angle) to a PWM duty cycle."""
+        """Map a mechanical angle onto the positional PWM span."""
+        travel = max(1.0, self.travel_degrees)
+        clamped = max(0.0, min(float(angle), travel))
         return round(
-            self.min_duty + (angle / self.max_angle) * (self.max_duty - self.min_duty),
+            self.min_duty
+            + (clamped / travel) * (self.max_duty - self.min_duty),
             2,
         )
 
-    def rotate_to_angle(self, compartment_index: int, angle: float) -> bool:
-        """
-        Drive the compartment servo to an absolute angle (0–max_angle).
-        Used after successful face verification for the scheduled slot angle.
-        """
-        if compartment_index < 0 or compartment_index >= self.num_compartments:
-            logger.error("Invalid compartment: %d (range 0–%d)",
-                         compartment_index, self.num_compartments - 1)
+    def _shortest_slot_delta(self, current: int, target: int) -> int:
+        """Signed slot steps on a circular magazine (−4 … +4 for 9 slots)."""
+        raw = int(target) - int(current)
+        half = self.num_slots // 2
+        while raw > half:
+            raw -= self.num_slots
+        while raw < -half:
+            raw += self.num_slots
+        return raw
+
+    def _stop_pwm(self, pwm: gpio.PWM) -> None:
+        # Neutral stops continuous-rotation servos; then release to avoid buzz.
+        try:
+            pwm.ChangeDutyCycle(self.neutral_duty)
+            time.sleep(self.settle_time)
+        except Exception:
+            pass
+        try:
+            pwm.ChangeDutyCycle(0)
+        except Exception:
+            pass
+
+    def _rotate_continuous_by_degrees(
+        self, compartment_index: int, degrees: float
+    ) -> bool:
+        """Timed move for continuous-rotation / 360° MG996R units."""
+        if abs(degrees) < 0.5:
+            return True
+        pwm = self._pwms.get(compartment_index)
+        if gpio.AVAILABLE and pwm is None:
+            logger.error("No servo configured for compartment %d", compartment_index)
             return False
 
-        target_angle = max(0.0, min(float(angle), self.max_angle))
-        duty = self._angle_to_duty(target_angle)
-        logger.info("Compartment %d → %.1f° (duty %.2f%%)",
-                    compartment_index, target_angle, duty)
+        direction = 1.0 if degrees > 0 else -1.0
+        run_duty = self.neutral_duty + direction * self.run_duty_offset
+        run_duty = max(self.min_duty, min(self.max_duty, run_duty))
+        duration = abs(float(degrees)) / max(1.0, self.degrees_per_second)
 
-        if gpio.AVAILABLE:
-            pwm = self._pwms.get(compartment_index)
-            if pwm is None:
-                logger.error("No servo configured for compartment %d", compartment_index)
-                return False
-            pwm.ChangeDutyCycle(duty)
-            time.sleep(self.hold_time)
-            pwm.ChangeDutyCycle(0)  # release to prevent jitter/buzz
-        else:
-            logger.debug("[SIM] Compartment %d servo → %.1f°",
-                         compartment_index, target_angle)
-            time.sleep(self.hold_time)
+        logger.info(
+            "Compartment %d continuous rotate %+.1f° (duty %.2f%%, %.2fs)",
+            compartment_index, degrees, run_duty, duration,
+        )
 
+        if not gpio.AVAILABLE:
+            time.sleep(min(duration, 2.0))
+            return True
+
+        pwm.ChangeDutyCycle(run_duty)
+        time.sleep(duration)
+        self._stop_pwm(pwm)
         return True
+
+    def _rotate_positional_to_angle(
+        self, compartment_index: int, angle: float
+    ) -> bool:
+        """Absolute move for true positional servos (usually 0–180°)."""
+        target_angle = max(0.0, min(float(angle), self.travel_degrees))
+        duty = self._angle_to_duty(target_angle)
+        logger.info(
+            "Compartment %d positional → %.1f° (duty %.2f%%)",
+            compartment_index, target_angle, duty,
+        )
+
+        if not gpio.AVAILABLE:
+            time.sleep(self.hold_time)
+            return True
+
+        pwm = self._pwms.get(compartment_index)
+        if pwm is None:
+            logger.error("No servo configured for compartment %d", compartment_index)
+            return False
+        pwm.ChangeDutyCycle(duty)
+        time.sleep(self.hold_time)
+        pwm.ChangeDutyCycle(0)
+        return True
+
+    def rotate_to_angle(self, compartment_index: int, angle: float) -> bool:
+        """
+        Drive toward an absolute mechanism angle.
+        Continuous mode treats this as a relative move from the last known angle.
+        """
+        if compartment_index < 0 or compartment_index >= self.num_compartments:
+            logger.error(
+                "Invalid compartment: %d (range 0–%d)",
+                compartment_index, self.num_compartments - 1,
+            )
+            return False
+
+        if self.mode == "positional":
+            return self._rotate_positional_to_angle(compartment_index, angle)
+
+        current_slot = self._current_slot.get(compartment_index, 0)
+        current_angle = self._slot_angle(current_slot)
+        delta = float(angle) - current_angle
+        # Normalize onto (−180, 180] for shortest spin.
+        while delta > 180:
+            delta -= 360
+        while delta <= -180:
+            delta += 360
+        return self._rotate_continuous_by_degrees(compartment_index, delta)
 
     def rotate_to(self, compartment_index: int, slot_index: int = 0) -> bool:
         """
-        Rotate the given compartment so ``slot_index`` aligns with its drop
-        hole (slot_index × 40° for 9 slots / 360°).
-        Returns True on success.
+        Rotate so ``slot_index`` aligns with the drop hole.
+        Each step is ``angle_per_slot`` degrees (default 40°).
         """
         if compartment_index < 0 or compartment_index >= self.num_compartments:
-            logger.error("Invalid compartment: %d (range 0–%d)",
-                         compartment_index, self.num_compartments - 1)
+            logger.error(
+                "Invalid compartment: %d (range 0–%d)",
+                compartment_index, self.num_compartments - 1,
+            )
             return False
         if slot_index < 0 or slot_index >= self.num_slots:
-            logger.error("Invalid slot: %d (range 0–%d)",
-                         slot_index, self.num_slots - 1)
+            logger.error(
+                "Invalid slot: %d (range 0–%d)",
+                slot_index, self.num_slots - 1,
+            )
             return False
 
-        target_angle = self._slot_angle(slot_index)
-        ok = self.rotate_to_angle(compartment_index, target_angle)
+        current = self._current_slot.get(compartment_index, 0)
+        if self.mode == "positional":
+            target_angle = self._slot_angle(slot_index)
+            if target_angle > self.travel_degrees + 0.1:
+                logger.error(
+                    "Slot %d needs %.1f° but positional travel is only %.1f°. "
+                    "Use servo.mode: continuous for a 9-slot / 360° cylinder.",
+                    slot_index, target_angle, self.travel_degrees,
+                )
+                return False
+            ok = self._rotate_positional_to_angle(compartment_index, target_angle)
+        else:
+            delta_slots = self._shortest_slot_delta(current, slot_index)
+            degrees = delta_slots * self.angle_per_slot
+            logger.info(
+                "Compartment %d slot %d -> %d (delta %d slot(s) = %+.1f deg)",
+                compartment_index, current, slot_index, delta_slots, degrees,
+            )
+            ok = self._rotate_continuous_by_degrees(compartment_index, degrees)
+
         if ok:
             self._current_slot[compartment_index] = slot_index
             logger.info(
-                "Compartment %d → slot %d (%.1f°)",
-                compartment_index, slot_index, target_angle,
+                "Compartment %d at slot %d (%.1f°)",
+                compartment_index, slot_index, self._slot_angle(slot_index),
             )
         return ok
 
     def dispense(self, compartment_index: int, slot_index: int = 0) -> bool:
-        """
-        Post-verification dispense move: rotate to the medication's slot
-        (40° × slot_index for a 9-slot / 360° cylinder).
-        """
+        """Post-verification move to the medication slot (40° × steps)."""
         return self.rotate_to(compartment_index, slot_index)
 
     def home(self, compartment_index: int | None = None) -> None:
-        """Return one compartment (or all) to slot 0 (0°). Prefer disabled after dispense."""
+        """Return one compartment (or all) to slot 0."""
         if compartment_index is None:
             for c in range(min(self.num_compartments, len(self.pins))):
                 self.rotate_to(c, 0)
@@ -158,6 +278,7 @@ class Dispenser:
     def cleanup(self) -> None:
         for pwm in self._pwms.values():
             try:
+                self._stop_pwm(pwm)
                 pwm.stop()
             except Exception:
                 pass

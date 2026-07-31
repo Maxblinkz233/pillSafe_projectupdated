@@ -35,21 +35,29 @@ dispense:
   home_after_dispense: false        # Do not home the cylinder after a dose
 
 # --- Servo Motors (one rotating cylinder per compartment) ---
-# After successful face verification the servo rotates to the scheduled slot
-# (9 slots × 40° = 360°). The servo stays still until verification succeeds.
+# After successful face verification the servo rotates in 40° steps to the
+# scheduled slot (9 slots × 40° = 360°). Stays still until verification succeeds.
 servo:
   frequency_hz: 50
   num_compartments: 6
-  num_slots: 9                       # angular slots per compartment (40° each)
-  # One signal pin per compartment (BCM numbering). Index = compartment.
-  # Avoids pins used by I2C RTC (2,3), IR sensors (23,24), buzzer (25),
-  # and the I2S mic (18,19,20).
+  num_slots: 9
+  angle_per_slot: 40                 # degrees moved per slot step
+  # continuous = timed 40° steps (correct for 360° / continuous MG996R)
+  # positional = absolute PWM (only if your servo is a true 0–180° position unit)
+  mode: continuous
   pins: [12, 13, 22, 17, 26, 27]
-  max_angle: 360                     # full rotation: 9 slots × 40° (MG996R 360°)
-  use_slot_indexing: true            # rotate to slot_index × 40° after face ACCEPTED
-  min_duty: 2.5                      # duty cycle at 0° — calibrate per servo
-  max_duty: 12.5                     # duty cycle at max_angle — calibrate per servo
-  hold_time: 0.8                     # seconds to hold before releasing (MG996R)
+  # Continuous-rotation calibration — tune degrees_per_second so one slot ≈ 40°.
+  neutral_duty: 7.5                  # stop (≈ 1.5 ms pulse at 50 Hz)
+  run_duty_offset: 2.5               # ± from neutral while turning
+  degrees_per_second: 50             # raise if moves <40°, lower if >40°
+  settle_time: 0.15
+  # Positional-only settings (ignored in continuous mode)
+  travel_degrees: 180
+  min_duty: 2.5
+  max_duty: 12.5
+  hold_time: 0.8
+  use_slot_indexing: true
+  max_angle: 360                     # legacy; continuous mode uses angle_per_slot
 
 # --- IR Sensors ---
 # When required is false, a successful verify + servo move logs TAKEN even if

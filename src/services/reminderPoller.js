@@ -82,8 +82,8 @@ export function startReminderPoller({onReminder, navigationRef} = {}) {
             onPress: () => {
               alerting = false;
               try {
-                // MainTabs is already active — navigate to the Verify tab.
-                navigationRef?.current?.navigate?.('Verify');
+                // Verify lives in the MainApp tab navigator (nested under the root stack).
+                navigationRef?.current?.navigate?.('MainApp', {screen: 'Verify'});
               } catch {
                 // Navigation may not be ready
               }

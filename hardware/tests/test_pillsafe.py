@@ -76,25 +76,25 @@ def test_bcd_roundtrip(value):
 def test_dispenser_slot_angles():
     from hardware.dispenser import Dispenser
     d = Dispenser()
-    # 9 slots across 360° → 40° per slot
+    # 9 slots × 40°
     assert d.angle_per_slot == pytest.approx(40.0)
     assert d._slot_angle(0) == pytest.approx(0.0)
     assert d._slot_angle(1) == pytest.approx(40.0)
     assert d._slot_angle(2) == pytest.approx(80.0)
     assert d._slot_angle(8) == pytest.approx(320.0)
-    # Duty cycle stays within the configured PWM band
-    duty0 = d._angle_to_duty(d._slot_angle(0))
-    duty_max = d._angle_to_duty(d.max_angle)
-    assert duty0 == pytest.approx(d.min_duty)
-    assert duty_max == pytest.approx(d.max_duty)
+    assert d._shortest_slot_delta(0, 1) == 1
+    assert d._shortest_slot_delta(0, 8) == -1
+    # 40° on a 180° positional span must not pretend travel is 360°.
+    d.travel_degrees = 180.0
+    assert d._angle_to_duty(40) == pytest.approx(2.5 + (40 / 180) * 10.0, abs=0.01)
+    assert d._angle_to_duty(180) == pytest.approx(d.max_duty)
 
 
 def test_dispenser_dispense_uses_slot_angle():
     from hardware.dispenser import Dispenser
     d = Dispenser()
-    assert d.use_slot_indexing is True
     assert d.num_slots == 9
-    assert d.dispense(0, 2) is True  # slot 2 → 80°
+    assert d.dispense(0, 2) is True  # two 40° steps from slot 0
     assert d.current_slot(0) == 2
 
 
@@ -103,9 +103,8 @@ def test_dispenser_rejects_bad_indices():
     d = Dispenser()
     assert d.rotate_to(-1, 0) is False
     assert d.rotate_to(0, 99) is False
-    # Valid call succeeds in simulation mode
     assert d.rotate_to(0, 1) is True
-    assert d.rotate_to_angle(0, 400) is True  # clamped to max_angle
+    assert d.current_slot(0) == 1
 
 
 # ── Database: schedules, inventory, notifications ────────────────────────────
