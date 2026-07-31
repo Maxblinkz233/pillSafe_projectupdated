@@ -23,6 +23,8 @@ import {useFocusEffect} from '@react-navigation/native';
 import {getApiConfig} from '../../services/config';
 import {
   api,
+  buildTodayDoses,
+  computeDashboardStats,
   formatRelativeTime,
   initials,
   notificationTypeLabel,
@@ -71,26 +73,32 @@ const MonitorScreen = ({navigation}) => {
 
       if (!cfg.userId) {
         setError('Select a user in Settings → Device Connection.');
+        setTaken(0);
+        setMissed(0);
+        setFailed(0);
+        setAdherence(0);
         setEvents([]);
         return;
       }
 
-      const [logs, notifications] = await Promise.all([
+      // Same schedule + grace logic as Home so overdue doses count as missed
+      // even before the hub writes an explicit MISSED adherence row.
+      const [schedules, logs, notifications] = await Promise.all([
+        api.getSchedules(cfg.userId),
         api.getAdherence(cfg.userId, todayIsoDate()),
         api.getNotifications(cfg.userId),
       ]);
 
+      const todayDoses = buildTodayDoses(schedules, logs);
+      const stats = computeDashboardStats(todayDoses, online);
       const list = logs || [];
-      const t = list.filter(l => l.outcome === 'TAKEN').length;
-      const m = list.filter(l => l.outcome === 'MISSED').length;
       const f = list.filter(
         l => l.outcome === 'REJECTED' || l.outcome === 'MECHANICAL_ERROR',
       ).length;
-      const total = list.length;
-      setTaken(t);
-      setMissed(m);
+      setTaken(stats.todayDoses);
+      setMissed(stats.missed);
       setFailed(f);
-      setAdherence(total === 0 ? 0 : Math.round((t / total) * 100));
+      setAdherence(stats.adherence);
 
       setEvents(
         (notifications || []).slice(0, 12).map(n => {
@@ -119,8 +127,13 @@ const MonitorScreen = ({navigation}) => {
         await load();
         if (active) setLoading(false);
       })();
+      // Refresh periodically so overdue doses flip to missed without pull-to-refresh.
+      const timer = setInterval(() => {
+        if (active) load();
+      }, 20000);
       return () => {
         active = false;
+        clearInterval(timer);
       };
     }, [load]),
   );

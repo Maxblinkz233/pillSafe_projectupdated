@@ -19,7 +19,7 @@ import {
   CheckCircle,
 } from 'lucide-react-native';
 import {getApiConfig} from '../../services/config';
-import {api, formatTime12h, toDoseTime24h} from '../../services/api';
+import {api, buildTodayDoses, formatTime12h, toDoseTime24h, todayIsoDate} from '../../services/api';
 
 const SLOTS = [
   {label: 'Slot 1', index: 0},
@@ -57,15 +57,68 @@ function initialTimeParts() {
   };
 }
 
-const AddMedicationScreen = ({navigation}) => {
-  const initial = useMemo(() => initialTimeParts(), []);
-  const [name, setName] = useState('');
-  const [dosage, setDosage] = useState('');
-  const [hour12, setHour12] = useState(initial.hour12);
-  const [minute, setMinute] = useState(initial.minute);
-  const [period, setPeriod] = useState(initial.period);
-  const [selectedSlot, setSelectedSlot] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState('');
+function timePartsFrom24(hhmm) {
+  const match = String(hhmm || '')
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return initialTimeParts();
+  let hour = Number(match[1]);
+  let minute = Number(match[2]);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return initialTimeParts();
+  minute = Math.round(minute / 5) * 5;
+  if (minute === 60) {
+    minute = 0;
+    hour = (hour + 1) % 24;
+  }
+  const period = hour >= 12 ? 'PM' : 'AM';
+  let hour12 = hour % 12;
+  if (hour12 === 0) hour12 = 12;
+  return {hour12, minute, period};
+}
+
+function splitDosage(raw) {
+  const text = String(raw || '');
+  const sep = ' · ';
+  const idx = text.lastIndexOf(sep);
+  if (idx === -1) return {dosage: text, category: ''};
+  const dosage = text.slice(0, idx).trim();
+  const category = text.slice(idx + sep.length).trim();
+  if (CATEGORIES.includes(category)) {
+    return {dosage, category};
+  }
+  return {dosage: text, category: ''};
+}
+
+const AddMedicationScreen = ({navigation, route}) => {
+  const editSchedule = route?.params?.schedule || null;
+  const scheduleId = editSchedule?.scheduleId ?? null;
+  const isEdit = scheduleId != null;
+
+  const seed = useMemo(() => {
+    if (!editSchedule) {
+      return {
+        name: '',
+        ...splitDosage(''),
+        ...initialTimeParts(),
+        slotIndex: 0,
+      };
+    }
+    const dosageParts = splitDosage(editSchedule.dosage || '');
+    return {
+      name: editSchedule.name || '',
+      ...dosageParts,
+      ...timePartsFrom24(editSchedule.time),
+      slotIndex: Number(editSchedule.slotIndex ?? 0),
+    };
+  }, [editSchedule]);
+
+  const [name, setName] = useState(seed.name);
+  const [dosage, setDosage] = useState(seed.dosage);
+  const [hour12, setHour12] = useState(seed.hour12);
+  const [minute, setMinute] = useState(seed.minute);
+  const [period, setPeriod] = useState(seed.period);
+  const [selectedSlot, setSelectedSlot] = useState(seed.slotIndex);
+  const [selectedCategory, setSelectedCategory] = useState(seed.category);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedLabel, setSavedLabel] = useState('');
@@ -89,18 +142,44 @@ const AddMedicationScreen = ({navigation}) => {
         );
       }
 
+      if (isEdit) {
+        const [schedules, logs] = await Promise.all([
+          api.getSchedules(cfg.userId),
+          api.getAdherence(cfg.userId, todayIsoDate()),
+        ]);
+        const today = buildTodayDoses(schedules, logs);
+        const current = today.find(d => d.scheduleId === scheduleId);
+        if (current?.status === 'taken') {
+          Alert.alert(
+            'Already dispensed',
+            'This dose was already dispensed today and cannot be edited.',
+          );
+          return;
+        }
+      }
+
       const dosageText = selectedCategory
         ? `${dosage.trim()} · ${selectedCategory}`
         : dosage.trim();
 
-      await api.createSchedule({
-        userId: cfg.userId,
-        medicationName: name.trim(),
-        doseTime: doseTime24,
-        slotIndex: selectedSlot,
-        dosage: dosageText,
-        pillsPerDose: 1,
-      });
+      if (isEdit) {
+        await api.updateSchedule(scheduleId, {
+          medicationName: name.trim(),
+          doseTime: doseTime24,
+          slotIndex: selectedSlot,
+          dosage: dosageText,
+          pillsPerDose: 1,
+        });
+      } else {
+        await api.createSchedule({
+          userId: cfg.userId,
+          medicationName: name.trim(),
+          doseTime: doseTime24,
+          slotIndex: selectedSlot,
+          dosage: dosageText,
+          pillsPerDose: 1,
+        });
+      }
 
       setSavedLabel(doseTimeLabel);
       setSaved(true);
@@ -116,7 +195,9 @@ const AddMedicationScreen = ({navigation}) => {
     return (
       <View style={styles.successContainer}>
         <CheckCircle size={60} color="#10B981" />
-        <Text style={styles.successTitle}>Medication Added!</Text>
+        <Text style={styles.successTitle}>
+          {isEdit ? 'Medication Updated!' : 'Medication Added!'}
+        </Text>
         <Text style={styles.successSub}>
           {name} at {savedLabel} was saved to the hub schedule.
         </Text>
@@ -134,7 +215,9 @@ const AddMedicationScreen = ({navigation}) => {
           onPress={() => navigation.goBack()}>
           <ChevronLeft size={22} color="#374151" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Add Medication</Text>
+        <Text style={styles.headerTitle}>
+          {isEdit ? 'Edit Medication' : 'Add Medication'}
+        </Text>
         <View style={{width: 36}} />
       </View>
 
@@ -294,7 +377,9 @@ const AddMedicationScreen = ({navigation}) => {
         ) : (
           <>
             <CheckCircle size={20} color="#FFFFFF" />
-            <Text style={styles.saveButtonText}>Save to Hub</Text>
+            <Text style={styles.saveButtonText}>
+              {isEdit ? 'Save Changes' : 'Save to Hub'}
+            </Text>
           </>
         )}
       </TouchableOpacity>

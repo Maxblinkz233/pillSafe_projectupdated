@@ -155,6 +155,26 @@ export const api = {
       },
     }),
 
+  updateSchedule: (
+    scheduleId,
+    {medicationName, doseTime, slotIndex, dosage, pillsPerDose, repeatDays, isActive},
+  ) =>
+    request(`/schedules/${scheduleId}`, {
+      method: 'PUT',
+      body: {
+        ...(medicationName != null ? {medication_name: medicationName} : {}),
+        ...(doseTime != null ? {dose_time: doseTime} : {}),
+        ...(slotIndex != null ? {slot_index: slotIndex} : {}),
+        ...(dosage != null ? {dosage} : {}),
+        ...(pillsPerDose != null ? {pills_per_dose: pillsPerDose} : {}),
+        ...(repeatDays != null ? {repeat_days: repeatDays} : {}),
+        ...(isActive != null ? {is_active: isActive} : {}),
+      },
+    }),
+
+  deleteSchedule: scheduleId =>
+    request(`/schedules/${scheduleId}`, {method: 'DELETE'}),
+
   getSchedules: userId =>
     request('/schedules', { query: userId != null ? { user_id: userId } : {} }),
 

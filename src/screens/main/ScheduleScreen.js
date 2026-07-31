@@ -8,6 +8,7 @@ import {
   StatusBar,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import {
   Bell,
@@ -70,6 +71,66 @@ const ScheduleScreen = ({navigation}) => {
     }, [load]),
   );
 
+  const confirmDelete = med => {
+    Alert.alert(
+      'Delete medication?',
+      `Remove ${med.name} (${formatTime12h(med.time)}) from the schedule?`,
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.deleteSchedule(med.scheduleId);
+              await load();
+            } catch (err) {
+              Alert.alert('Could not delete', err.message || String(err));
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const openMedActions = med => {
+    const isDispensed = med.status === 'taken';
+    const buttons = [];
+
+    if (!isDispensed) {
+      buttons.push({
+        text: 'Edit',
+        onPress: () =>
+          navigation.navigate('AddMedication', {
+            schedule: {
+              scheduleId: med.scheduleId,
+              name: med.name,
+              dosage: med.dosage || '',
+              time: med.time,
+              slotIndex: med.slotIndex ?? 0,
+            },
+          }),
+      });
+    }
+
+    buttons.push(
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => confirmDelete(med),
+      },
+      {text: 'Cancel', style: 'cancel'},
+    );
+
+    Alert.alert(
+      med.name,
+      isDispensed
+        ? `${formatTime12h(med.time)} · already dispensed today (edit locked)`
+        : `${formatTime12h(med.time)} · ${med.slot}`,
+      buttons,
+    );
+  };
+
   const morningMeds = doses.filter(m => m.period === 'MORNING');
   const afternoonMeds = doses.filter(m => m.period === 'AFTERNOON');
   const eveningMeds = doses.filter(
@@ -93,11 +154,12 @@ const ScheduleScreen = ({navigation}) => {
           <TouchableOpacity
             key={med.id}
             style={[styles.medCard, med.status === 'taken' && {opacity: 0.65}]}
-            disabled={med.status === 'taken'}
+            delayLongPress={350}
             onPress={() => {
               if (med.status === 'taken') return;
               navigation.navigate('Verify', {scheduleId: med.scheduleId});
-            }}>
+            }}
+            onLongPress={() => openMedActions(med)}>
             <View
               style={[
                 styles.medStatusBar,
@@ -174,6 +236,12 @@ const ScheduleScreen = ({navigation}) => {
           <Text style={styles.addButtonText}>Add Med</Text>
         </TouchableOpacity>
       </View>
+
+      {doses.length > 0 && (
+        <Text style={styles.hintText}>
+          Long-press a medication to edit or delete it.
+        </Text>
+      )}
 
       {!!error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -271,6 +339,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: -12,
+    marginBottom: 16,
   },
   protocolLabel: {
     fontSize: 11,
