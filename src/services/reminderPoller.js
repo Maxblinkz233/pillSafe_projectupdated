@@ -4,7 +4,7 @@ import {getApiConfig} from './config';
 import {api} from './api';
 
 const SEEN_KEY = 'pillsafe_seen_reminder_ids';
-const POLL_MS = 15000;
+const POLL_MS = 3000;
 
 async function loadSeenIds() {
   try {
@@ -23,8 +23,8 @@ async function saveSeenIds(ids) {
 }
 
 /**
- * Poll hub notifications for REMINDER events and surface an Alert on the phone
- * when medication time is up. Returns a stop() function.
+ * Poll hub notifications for REMINDER events and alert the phone when
+ * medication time is up. Returns a stop() function.
  */
 export function startReminderPoller({onReminder, navigationRef} = {}) {
   let stopped = false;
@@ -53,12 +53,13 @@ export function startReminderPoller({onReminder, navigationRef} = {}) {
 
       alerting = true;
       const message =
-        newest.message || 'It is time to take your medication.';
+        newest.message ||
+        'Time is up to take your medicine. Open Verify Now when you are ready.';
       if (typeof onReminder === 'function') {
         onReminder(newest);
       }
       Alert.alert(
-        'Medication Reminder',
+        'Time Is Up',
         message,
         [
           {

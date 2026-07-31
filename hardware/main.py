@@ -15,13 +15,13 @@ Startup Sequence:
 
 Operational Workflow (per event):
   1. Scheduler detects a time match → creates DispenseEvent
-  2. Buzzer plays "dose_ready" + REMINDER notification to the app
+  2. REMINDER notification to the phone + dose-due buzzer (45–60 s)
   3. Camera activates → face detection + FaceNet (TFLite) verification
      (each Verify Now = up to 8 captures; SMS after 3 failed sets; lockout after 5)
-  4. On ACCEPT: servo rotates to slot (slot × 40°) → log TAKEN → SMS caregiver
+  4. On ACCEPT: buzzer stops → servo rotates to slot → log TAKEN → SMS caregiver
   5. On REJECT lockout (5 failed sets): log REJECTED (caregiver already SMS'd at set 3)
   6. On TIMEOUT (grace period): log MISSED → SMS caregiver
-  7. Return to idle (servo is not moved again)
+  7. Return to idle (buzzer off; servo is not moved again)
 """
 
 import os
@@ -201,15 +201,17 @@ class PillSafeSystem:
         with self._active_dispense_lock:
             self._active_dispense_event = event
 
-        # Step 1: Notify the app + sound the buzzer once when the dose is due.
-        # The buzzer is intentionally used only for dose-due alerts.
+        # Step 1: Phone REMINDER first, then start the dose-due buzzer
+        # (45–60 s, background). Buzzer must be stopped before dispensing.
+        med_label = event.medication_name + (
+            f" ({event.dosage})" if event.dosage else ""
+        )
         self._notify(
             "REMINDER",
-            f"Time to take {event.medication_name}"
-            + (f" ({event.dosage})" if event.dosage else ""),
+            f"Time is up to take your medicine: {med_label}",
             user_id=event.user_id,
         )
-        self.buzzer.play("dose_ready", blocking=True)
+        self.buzzer.alert_dose_due()
 
         # Step 2: Activate camera (servo stays still until face is accepted)
         self.camera.start()
@@ -229,6 +231,8 @@ class PillSafeSystem:
                 # Autonomous timer-driven verification
                 self._run_autonomous_verification(event)
         finally:
+            # Never leave the buzzer running into/after dispense.
+            self.buzzer.stop()
             # Return to idle — do NOT home the servo (that moves the motor).
             self.camera.stop()
             dispense_cfg = getattr(get_config(), "dispense", None)
@@ -746,6 +750,9 @@ class PillSafeSystem:
         """
         cfg = get_config()
         ir_required = bool(getattr(getattr(cfg, "ir_sensors", None), "required", False))
+
+        # Silence dose-due alert before any motor movement.
+        self.buzzer.stop()
 
         # Servo moves ONLY after verification accepted — to the medication slot
         rotated = self.dispenser.dispense(event.compartment_index, event.slot_index)

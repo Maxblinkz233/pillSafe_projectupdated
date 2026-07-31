@@ -61,8 +61,13 @@ ir_sensors:
   required: false
 
 # --- Buzzer ---
+# Sounds only when a scheduled dose becomes due (not during dispensing).
 buzzer:
   pin: 25
+  dose_ready_duration_seconds: 50   # alert length (clamped to 45–60 s)
+  dose_ready_beep_seconds: 0.35     # on time per beep
+  dose_ready_gap_seconds: 0.65      # off time between beeps
+  # Kept for older configs; ignored by the new long dose-due alert.
   dose_ready_pattern: [0.2, 0.1, 0.2, 0.1, 0.2]
   success_pattern: [0.5]
   failure_pattern: [0.1, 0.1, 0.1, 0.1, 0.1]
