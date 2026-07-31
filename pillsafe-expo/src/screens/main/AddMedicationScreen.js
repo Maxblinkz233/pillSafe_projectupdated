@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,7 @@ import {
   CheckCircle,
 } from 'lucide-react-native';
 import {getApiConfig} from '../../services/config';
-import {api} from '../../services/api';
+import {api, formatTime12h, toDoseTime24h} from '../../services/api';
 
 const SLOTS = [
   {label: 'Slot 1', index: 0},
@@ -40,21 +40,43 @@ const CATEGORIES = [
   'Antibiotic',
   'Other',
 ];
+const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+function initialTimeParts() {
+  const now = new Date();
+  let hour = now.getHours();
+  const period = hour >= 12 ? 'PM' : 'AM';
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+  const minute = Math.round(now.getMinutes() / 5) * 5;
+  return {
+    hour12: hour,
+    minute: minute === 60 ? 0 : minute,
+    period,
+  };
+}
 
 const AddMedicationScreen = ({navigation}) => {
+  const initial = useMemo(() => initialTimeParts(), []);
   const [name, setName] = useState('');
   const [dosage, setDosage] = useState('');
-  const [time, setTime] = useState('');
+  const [hour12, setHour12] = useState(initial.hour12);
+  const [minute, setMinute] = useState(initial.minute);
+  const [period, setPeriod] = useState(initial.period);
   const [selectedSlot, setSelectedSlot] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savedLabel, setSavedLabel] = useState('');
 
-  const canSave = Boolean(name.trim() && dosage.trim() && /^\d{1,2}:\d{2}$/.test(time.trim()));
+  const doseTime24 = toDoseTime24h(hour12, minute, period);
+  const doseTimeLabel = formatTime12h(doseTime24);
+  const canSave = Boolean(name.trim() && dosage.trim() && doseTime24);
 
   const handleSave = async () => {
     if (!canSave) {
-      Alert.alert('Missing fields', 'Enter name, dosage, and time as HH:MM.');
+      Alert.alert('Missing fields', 'Enter name, dosage, and choose a time.');
       return;
     }
 
@@ -67,7 +89,6 @@ const AddMedicationScreen = ({navigation}) => {
         );
       }
 
-      const doseTime = time.trim();
       const dosageText = selectedCategory
         ? `${dosage.trim()} · ${selectedCategory}`
         : dosage.trim();
@@ -75,12 +96,13 @@ const AddMedicationScreen = ({navigation}) => {
       await api.createSchedule({
         userId: cfg.userId,
         medicationName: name.trim(),
-        doseTime,
+        doseTime: doseTime24,
         slotIndex: selectedSlot,
         dosage: dosageText,
         pillsPerDose: 1,
       });
 
+      setSavedLabel(doseTimeLabel);
       setSaved(true);
       setTimeout(() => navigation.goBack(), 1200);
     } catch (err) {
@@ -96,7 +118,7 @@ const AddMedicationScreen = ({navigation}) => {
         <CheckCircle size={60} color="#10B981" />
         <Text style={styles.successTitle}>Medication Added!</Text>
         <Text style={styles.successSub}>
-          {name} at {time} was saved to the hub schedule.
+          {name} at {savedLabel} was saved to the hub schedule.
         </Text>
       </View>
     );
@@ -145,19 +167,73 @@ const AddMedicationScreen = ({navigation}) => {
             />
           </View>
         </View>
-        <View style={styles.divider} />
-        <View style={styles.inputRow}>
-          <Clock size={18} color="#6B7280" />
-          <View style={styles.inputWrapper}>
-            <Text style={styles.inputLabel}>Dose Time (HH:MM)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. 08:00"
-              placeholderTextColor="#D1D5DB"
-              value={time}
-              onChangeText={setTime}
-            />
-          </View>
+      </View>
+
+      <Text style={styles.sectionLabel}>DOSE TIME</Text>
+      <View style={styles.timeCard}>
+        <View style={styles.timeHeader}>
+          <Clock size={18} color="#3B5BDB" />
+          <Text style={styles.timePreview}>{doseTimeLabel}</Text>
+        </View>
+
+        <Text style={styles.timePartLabel}>Hour</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.timeChipRow}>
+          {HOURS_12.map(h => (
+            <TouchableOpacity
+              key={`h-${h}`}
+              style={[styles.timeChip, hour12 === h && styles.timeChipActive]}
+              onPress={() => setHour12(h)}>
+              <Text
+                style={[
+                  styles.timeChipText,
+                  hour12 === h && styles.timeChipTextActive,
+                ]}>
+                {h}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <Text style={styles.timePartLabel}>Minute</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.timeChipRow}>
+          {MINUTES.map(m => (
+            <TouchableOpacity
+              key={`m-${m}`}
+              style={[styles.timeChip, minute === m && styles.timeChipActive]}
+              onPress={() => setMinute(m)}>
+              <Text
+                style={[
+                  styles.timeChipText,
+                  minute === m && styles.timeChipTextActive,
+                ]}>
+                {String(m).padStart(2, '0')}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <Text style={styles.timePartLabel}>AM / PM</Text>
+        <View style={styles.periodRow}>
+          {['AM', 'PM'].map(p => (
+            <TouchableOpacity
+              key={p}
+              style={[styles.periodChip, period === p && styles.periodChipActive]}
+              onPress={() => setPeriod(p)}>
+              <Text
+                style={[
+                  styles.periodChipText,
+                  period === p && styles.periodChipTextActive,
+                ]}>
+                {p}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </View>
 
@@ -289,6 +365,57 @@ const styles = StyleSheet.create({
   },
   input: {fontSize: 15, color: '#111827', fontWeight: '500', padding: 0},
   divider: {height: 1, backgroundColor: '#F3F4F6', marginLeft: 46},
+  timeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  timeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  timePreview: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  timePartLabel: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  timeChipRow: {
+    gap: 8,
+    paddingBottom: 12,
+  },
+  timeChip: {
+    minWidth: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  timeChipActive: {backgroundColor: '#3B5BDB'},
+  timeChipText: {fontSize: 15, fontWeight: '600', color: '#374151'},
+  timeChipTextActive: {color: '#FFFFFF'},
+  periodRow: {flexDirection: 'row', gap: 10},
+  periodChip: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  periodChipActive: {backgroundColor: '#3B5BDB'},
+  periodChipText: {fontSize: 16, fontWeight: '700', color: '#374151'},
+  periodChipTextActive: {color: '#FFFFFF'},
   chipGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

@@ -201,14 +201,14 @@ class PillSafeSystem:
         with self._active_dispense_lock:
             self._active_dispense_event = event
 
-        # Step 1: Notify the app + sound the buzzer to alert the user (NFR-18)
+        # Step 1: Notify the app + sound the buzzer once when the dose is due.
+        # The buzzer is intentionally used only for dose-due alerts.
         self._notify(
             "REMINDER",
             f"Time to take {event.medication_name}"
             + (f" ({event.dosage})" if event.dosage else ""),
             user_id=event.user_id,
         )
-        # Blocking so the dose-due tone always plays before camera work starts
         self.buzzer.play("dose_ready", blocking=True)
 
         # Step 2: Activate camera (servo stays still until face is accepted)
@@ -554,9 +554,6 @@ class PillSafeSystem:
         cfg = get_config()
         dispense_cfg = getattr(cfg, "dispense", None)
         poll = getattr(dispense_cfg, "verify_request_poll_seconds", 2) if dispense_cfg else 2
-        remind_every = (
-            getattr(dispense_cfg, "reminder_buzz_seconds", 30) if dispense_cfg else 30
-        )
         sms_after = int(getattr(cfg.face, "reject_sets_before_sms", 3) or 3)
         lockout_after = int(getattr(cfg.face, "reject_sets_before_lockout", 5) or 5)
 
@@ -567,13 +564,7 @@ class PillSafeSystem:
             lockout_after,
         )
 
-        last_buzz = time.time()
         while datetime.now() < event.grace_deadline and self._running:
-            # Keep reminding the patient that the dose is due
-            if remind_every and (time.time() - last_buzz) >= remind_every:
-                self.buzzer.play("dose_ready", blocking=False)
-                last_buzz = time.time()
-
             pending = self._consume_verify_request(event)
             if pending is None:
                 time.sleep(poll)
@@ -680,7 +671,6 @@ class PillSafeSystem:
                 ),
             }
 
-        self.buzzer.play("failure")
         self._notify(
             "REJECTED",
             f"Face did not match for {event.medication_name} "
@@ -795,7 +785,6 @@ class PillSafeSystem:
             actual_time=actual_time,
             auth_mode=auth_mode,
         )
-        self.buzzer.play("success", blocking=False)
         self._update_inventory_after_dispense(event)
         self._notify(
             "DISPENSED",
@@ -867,7 +856,6 @@ class PillSafeSystem:
             outcome="REJECTED",
             auth_mode=auth_mode,
         )
-        self.buzzer.play("failure")
         self._notify(
             "REJECTED",
             f"Verification failed for {event.full_name} ({event.medication_name})",
@@ -887,7 +875,6 @@ class PillSafeSystem:
             outcome="MISSED",
             auth_mode=auth_mode,
         )
-        self.buzzer.play("missed")
         self._notify(
             "MISSED",
             f"Missed dose: {event.medication_name} for {event.full_name} "
@@ -957,7 +944,6 @@ class PillSafeSystem:
             outcome="MECHANICAL_ERROR",
             auth_mode=auth_mode,
         )
-        self.buzzer.play("failure")
         self._notify(
             "MECHANICAL_ERROR",
             f"Dispensing error for {event.full_name} ({event.medication_name})",

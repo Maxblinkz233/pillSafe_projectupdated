@@ -26,6 +26,7 @@ import {
   actionableDoses,
   api,
   buildTodayDoses,
+  formatTime12h,
   greetingForNow,
   initials,
   nextPendingDose,
@@ -217,7 +218,10 @@ const ReadyState = ({
   onSelectDose,
   loading,
   errorMessage,
-}) => (
+}) => {
+  const canVerify = Boolean(selectedDose) && doses.length > 0;
+
+  return (
   <ScrollView style={styles.container} contentContainerStyle={{paddingBottom: 40}}>
     <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
     <View style={styles.header}>
@@ -241,6 +245,11 @@ const ReadyState = ({
       <Text style={styles.readyTitle}>Ready to Dispense?</Text>
       {loading ? (
         <ActivityIndicator color="#3B5BDB" style={{marginBottom: 24}} />
+      ) : doses.length === 0 ? (
+        <Text style={styles.readySub}>
+          No pills left to verify right now. Verification is temporarily
+          disabled until a due, upcoming, or missed dose is available.
+        </Text>
       ) : (
         <Text style={styles.readySub}>
           Choose any due, upcoming, or missed dose. A missed morning pill does
@@ -264,7 +273,8 @@ const ReadyState = ({
                 <View style={styles.doseCardText}>
                   <Text style={styles.doseName}>{dose.name}</Text>
                   <Text style={styles.doseMeta}>
-                    {dose.time} • {dose.slot} • {statusLabel(dose.status)}
+                    {formatTime12h(dose.time)} • {dose.slot} •{' '}
+                    {statusLabel(dose.status)}
                   </Text>
                 </View>
                 {selected && <CheckCircle size={18} color="#3B5BDB" />}
@@ -274,41 +284,49 @@ const ReadyState = ({
         </View>
       )}
 
-      <View style={styles.faceFrame}>
+      <View style={[styles.faceFrame, !canVerify && styles.faceFrameDisabled]}>
         <View style={styles.faceFrameCornerTL} />
         <View style={styles.faceFrameCornerTR} />
         <View style={styles.faceFrameCornerBL} />
         <View style={styles.faceFrameCornerBR} />
         <View style={styles.faceCircle}>
-          <ScanFace size={60} color="#C7D2FE" />
+          <ScanFace size={60} color={canVerify ? '#C7D2FE' : '#E5E7EB'} />
         </View>
       </View>
 
       <TouchableOpacity
-        style={[styles.scanButton, !selectedDose && styles.scanButtonDisabled]}
+        style={[styles.scanButton, !canVerify && styles.scanButtonDisabled]}
         onPress={onScan}
-        disabled={!selectedDose}>
+        disabled={!canVerify}>
         <Camera size={20} color="#FFFFFF" />
         <Text style={styles.scanButtonText}>Verify Now (Face)</Text>
       </TouchableOpacity>
       <Text style={styles.scanHint}>
-        {selectedDose
-          ? `Selected: ${selectedDose.name} at ${selectedDose.time}`
-          : 'No dose selected'}
+        {canVerify
+          ? `Selected: ${selectedDose.name} at ${formatTime12h(selectedDose.time)}`
+          : 'Verification disabled — no pill to verify'}
       </Text>
       <TouchableOpacity
-        style={styles.voiceButton}
+        style={[styles.voiceButton, !canVerify && styles.voiceButtonDisabled]}
+        disabled={!canVerify}
         onPress={() =>
           navigation.navigate('VoiceVerify', {
             scheduleId: selectedDose?.scheduleId,
           })
         }>
-        <Mic size={20} color="#3B5BDB" />
-        <Text style={styles.voiceButtonText}>Use Voice Instead</Text>
+        <Mic size={20} color={canVerify ? '#3B5BDB' : '#9CA3AF'} />
+        <Text
+          style={[
+            styles.voiceButtonText,
+            !canVerify && styles.voiceButtonTextDisabled,
+          ]}>
+          Use Voice Instead
+        </Text>
       </TouchableOpacity>
     </View>
   </ScrollView>
-);
+  );
+};
 
 const ScanningState = ({onCancel}) => (
   <ScrollView style={styles.container}>
@@ -588,6 +606,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     position: 'relative',
   },
+  faceFrameDisabled: {opacity: 0.45},
   faceFrameCornerTL: {
     position: 'absolute',
     top: 0,
@@ -670,10 +689,17 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
+  voiceButtonDisabled: {
+    borderColor: '#D1D5DB',
+    opacity: 0.6,
+  },
   voiceButtonText: {
     color: '#3B5BDB',
     fontSize: 15,
     fontWeight: '600',
+  },
+  voiceButtonTextDisabled: {
+    color: '#9CA3AF',
   },
   scanningHeader: {
     flexDirection: 'row',

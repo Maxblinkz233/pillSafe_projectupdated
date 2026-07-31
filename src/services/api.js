@@ -390,6 +390,38 @@ export function actionableDoses(doses) {
     .sort((a, b) => String(a.time).localeCompare(String(b.time)));
 }
 
+/** Display "08:00" as "8:00 AM" for friendlier UI. */
+export function formatTime12h(hhmm) {
+  if (hhmm == null || hhmm === '') return '--';
+  const match = String(hhmm)
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return String(hhmm);
+  let hour = Number(match[1]);
+  const minute = match[2];
+  if (Number.isNaN(hour) || hour < 0 || hour > 23) return String(hhmm);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+  return `${hour}:${minute} ${period}`;
+}
+
+/** Convert 12-hour picker values to hub dose_time "HH:MM" (24h). */
+export function toDoseTime24h(hour12, minute, period) {
+  let hour = Number(hour12);
+  const mins = Number(minute);
+  const ampm = String(period || 'AM').toUpperCase();
+  if (Number.isNaN(hour) || Number.isNaN(mins)) {
+    throw new Error('Invalid time');
+  }
+  if (ampm === 'AM') {
+    if (hour === 12) hour = 0;
+  } else if (hour !== 12) {
+    hour += 12;
+  }
+  return `${String(hour).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
 /**
  * Next dispense card: prefer due-now, then soonest future pending,
  * then soonest missed (late catch-up) — never lock on one overdue forever.

@@ -22,6 +22,7 @@ import {getApiConfig} from '../../services/config';
 import {
   api,
   buildTodayDoses,
+  formatTime12h,
   initials,
   todayIsoDate,
 } from '../../services/api';
@@ -91,10 +92,12 @@ const ScheduleScreen = ({navigation}) => {
         {meds.map(med => (
           <TouchableOpacity
             key={med.id}
-            style={styles.medCard}
-            onPress={() =>
-              navigation.navigate('Verify', {scheduleId: med.scheduleId})
-            }>
+            style={[styles.medCard, med.status === 'taken' && {opacity: 0.65}]}
+            disabled={med.status === 'taken'}
+            onPress={() => {
+              if (med.status === 'taken') return;
+              navigation.navigate('Verify', {scheduleId: med.scheduleId});
+            }}>
             <View
               style={[
                 styles.medStatusBar,
@@ -114,7 +117,7 @@ const ScheduleScreen = ({navigation}) => {
             <View style={styles.medInfo}>
               <Text style={styles.medName}>{med.name}</Text>
               <Text style={styles.medSub}>
-                {med.dosage || 'Dose'} • {med.time} • {med.status}
+                {med.dosage || 'Dose'} • {formatTime12h(med.time)} • {med.status}
               </Text>
             </View>
             <View style={styles.slotBadge}>

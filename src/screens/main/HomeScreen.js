@@ -27,8 +27,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getApiConfig } from '../../services/config';
 import {
   api,
+  actionableDoses,
   buildTodayDoses,
   computeDashboardStats,
+  formatTime12h,
   greetingForNow,
   initials,
   nextPendingDose,
@@ -124,6 +126,8 @@ const HomeScreen = ({ navigation }) => {
     load();
   };
 
+  const canVerify = actionableDoses(doses).length > 0;
+
   return (
     <ScrollView
       style={styles.container}
@@ -205,7 +209,8 @@ const HomeScreen = ({ navigation }) => {
             </View>
           </View>
           <TouchableOpacity
-            style={styles.takeNowButton}
+            style={[styles.takeNowButton, !canVerify && {opacity: 0.45}]}
+            disabled={!canVerify}
             onPress={() => navigation.navigate('Verify')}
           >
             <Text style={styles.takeNowText}>VERIFY</Text>
@@ -269,7 +274,7 @@ const HomeScreen = ({ navigation }) => {
                 <Clock size={20} color="#A5B4FC" />
               </View>
               <Text style={styles.nextDispenseTime}>
-                {nextDose ? nextDose.time : '--:--'}
+                {nextDose ? formatTime12h(nextDose.time) : '--:--'}
               </Text>
               <View style={styles.nextDispenseBottom}>
                 <View>
@@ -315,11 +320,16 @@ const HomeScreen = ({ navigation }) => {
               .map(med => (
                 <TouchableOpacity
                   key={med.id}
-                  style={styles.medCard}
+                  style={[
+                    styles.medCard,
+                    med.status === 'taken' && {opacity: 0.7},
+                  ]}
                   activeOpacity={0.75}
-                  onPress={() =>
-                    navigation.navigate('Verify', {scheduleId: med.scheduleId})
-                  }>
+                  disabled={med.status === 'taken' || !canVerify}
+                  onPress={() => {
+                    if (med.status === 'taken') return;
+                    navigation.navigate('Verify', {scheduleId: med.scheduleId});
+                  }}>
                   <View
                     style={[
                       styles.medStatusBar,
@@ -368,12 +378,12 @@ const HomeScreen = ({ navigation }) => {
                     ]}
                   >
                     {med.status === 'taken'
-                      ? `Taken ${med.takenAt || ''}`.trim()
+                      ? `Taken ${med.takenAt ? formatTime12h(med.takenAt) : ''}`.trim()
                       : med.status === 'due'
-                      ? `Due now ${med.time}`
+                      ? `Due now ${formatTime12h(med.time)}`
                       : med.status === 'pending'
-                      ? `Pending ${med.time}`
-                      : `Missed ${med.time}`}
+                      ? `Pending ${formatTime12h(med.time)}`
+                      : `Missed ${formatTime12h(med.time)}`}
                   </Text>
                 </TouchableOpacity>
               ))
@@ -403,11 +413,14 @@ const HomeScreen = ({ navigation }) => {
             </View>
             <View style={styles.deviceButtons}>
               <TouchableOpacity
-                style={styles.deviceBtn}
+                style={[styles.deviceBtn, !canVerify && {opacity: 0.45}]}
+                disabled={!canVerify}
                 onPress={() => navigation.navigate('Verify')}
               >
                 <FlaskConical size={14} color="#374151" />
-                <Text style={styles.deviceBtnText}>Verify Now</Text>
+                <Text style={styles.deviceBtnText}>
+                  {canVerify ? 'Verify Now' : 'No Dose'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.deviceBtnOutline}
