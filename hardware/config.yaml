@@ -83,7 +83,7 @@ alerts:
 api:
   host: "0.0.0.0"
   port: 5000
-  token: "pillsafe2026max"
+  token: "pillsafe"
 
 # --- Database ---
 database:
