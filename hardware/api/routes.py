@@ -110,6 +110,56 @@ def create_app(db: DatabaseManager,
 
     # ── Hub Camera Preview ───────────────────────────────────
 
+    def _encode_preview_jpeg():
+        """Capture one hub frame and encode it as JPEG bytes."""
+        if camera is None:
+            return None, (jsonify({
+                "status": "error",
+                "error": "Camera preview is not available",
+            }), 503)
+
+        camera.start()
+        if not camera.is_active:
+            return None, (jsonify({
+                "status": "error",
+                "error": "Camera could not be started",
+            }), 503)
+
+        frame = camera.capture_frame()
+        if frame is None:
+            return None, (jsonify({
+                "status": "error",
+                "error": "No camera frame available",
+            }), 503)
+
+        encoded, jpeg = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), 70],
+        )
+        if not encoded:
+            return None, (jsonify({
+                "status": "error",
+                "error": "Failed to encode camera frame",
+            }), 500)
+        return jpeg.tobytes(), None
+
+    @app.route("/camera/snapshot", methods=["GET"])
+    @require_auth
+    def camera_snapshot():
+        """Single JPEG frame for phone apps (iOS WebView cannot show MJPEG)."""
+        payload, error = _encode_preview_jpeg()
+        if error is not None:
+            return error
+        return Response(
+            payload,
+            mimetype="image/jpeg",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
     @app.route("/camera/stream", methods=["GET"])
     @require_auth
     def camera_stream():

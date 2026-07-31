@@ -48,10 +48,12 @@ const FaceEnrollScreen = ({navigation}) => {
     setEnrollState('scanning');
     setErrorMessage('');
     setStatusText(
-      'Capturing on the hubâ€¦ look at the dispenser camera and hold still.',
+      'Capturing on the hub… look at the dispenser camera and hold still.',
     );
 
     try {
+      // Give the live preview a moment to mount and fetch the first frame.
+      await new Promise(resolve => setTimeout(resolve, 600));
       await api.enrolFace(userId);
       const status = await api.getEnrolStatus(userId);
       if (!status?.face_enrolled) {
@@ -64,7 +66,9 @@ const FaceEnrollScreen = ({navigation}) => {
       setErrorMessage(err.message || String(err));
       setStatusText('Face enrolment failed.');
     } finally {
-      api.stopCameraPreview().catch(() => {});
+      setTimeout(() => {
+        api.stopCameraPreview().catch(() => {});
+      }, 400);
     }
   };
 
@@ -109,8 +113,8 @@ const FaceEnrollScreen = ({navigation}) => {
       </Text>
 
       <View style={styles.card}>
-        {enrollState === 'scanning' ? (
-          <CameraPreview />
+        {enrollState === 'ready' || enrollState === 'scanning' ? (
+          <CameraPreview active />
         ) : (
           <ScanFace
             size={72}

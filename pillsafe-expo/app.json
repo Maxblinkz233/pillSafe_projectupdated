@@ -11,6 +11,7 @@
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "PillSafe connects to the medication dispenser on your local network.",
         "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
           "NSAllowsLocalNetworking": true
         }
       }
