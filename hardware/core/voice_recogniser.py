@@ -33,7 +33,10 @@ ENROL_SAMPLES    = 3       # utterances captured during enrolment
 SIM_THRESHOLD    = 0.82    # cosine similarity threshold (0–1)
 MIN_RMS          = 0.015   # reject near-silence (stops false accepts on empty recordings)
 MODELS_DIR       = Path("models/voice")
-DEVICE_INDEX     = None    # None = default input device (set in config.yaml)
+DEVICE_INDEX     = None    # None = auto-pick VoiceHAT / default input
+
+# Cached after the first successful open so enrolment samples don't retry 16 kHz.
+_CAPTURE_CACHE: dict | None = None
 
 # Random prompt pool — displayed on mobile app, spoken by user
 CHALLENGE_PROMPTS = [
@@ -72,10 +75,9 @@ class VoiceRecogniser:
 
 
 def audio_input_available() -> bool:
-    """Return whether PortAudio exposes a usable default input device."""
+    """Return whether PortAudio exposes a usable input device."""
     try:
-        device = sd.query_devices(kind="input")
-        return bool(device and int(device.get("max_input_channels", 0)) > 0)
+        return _resolve_input_device() is not None
     except Exception:
         return False
 
@@ -90,11 +92,75 @@ def _voice_config():
     return getattr(cfg, "voice", None)
 
 
-def _configured_device_index():
+def _device_field(device_info, key, default=None):
+    if device_info is None:
+        return default
+    try:
+        if hasattr(device_info, "get"):
+            value = device_info.get(key, default)
+        else:
+            value = device_info[key]
+        return default if value is None else value
+    except Exception:
+        return default
+
+
+def _list_input_devices() -> list[tuple[int, object]]:
+    devices = []
+    try:
+        for index, info in enumerate(sd.query_devices()):
+            if int(_device_field(info, "max_input_channels", 0) or 0) > 0:
+                devices.append((index, info))
+    except Exception as exc:
+        logger.warning("Unable to list audio input devices: %s", exc)
+    return devices
+
+
+def _auto_pick_input_device() -> int | None:
+    """Prefer Google Voice HAT / I2S cards over HDMI or dummy ALSA devices."""
+    inputs = _list_input_devices()
+    if not inputs:
+        return None
+
+    scored = []
+    for index, info in inputs:
+        name = str(_device_field(info, "name", "")).lower()
+        score = 0
+        if "voicehat" in name or "googlevoicehat" in name:
+            score += 100
+        if "i2s" in name or "inmp" in name:
+            score += 50
+        if "usb" in name:
+            score += 20
+        if "hdmi" in name or "dummy" in name or "loopback" in name:
+            score -= 50
+        scored.append((score, index, name))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    best_score, best_index, best_name = scored[0]
+    if best_score > 0:
+        logger.info("Auto-selected audio input %d (%s)", best_index, best_name)
+        return best_index
+
+    # Fall back to PortAudio's default input.
+    try:
+        default = sd.query_devices(kind="input")
+        default_name = str(_device_field(default, "name", "default"))
+        for index, info in inputs:
+            if str(_device_field(info, "name", "")) == default_name:
+                return index
+    except Exception:
+        pass
+    return inputs[0][0]
+
+
+def _resolve_input_device() -> int | None:
     voice_cfg = _voice_config()
     if voice_cfg is not None and getattr(voice_cfg, "device_index", None) is not None:
-        return voice_cfg.device_index
-    return DEVICE_INDEX
+        return int(voice_cfg.device_index)
+    if DEVICE_INDEX is not None:
+        return int(DEVICE_INDEX)
+    return _auto_pick_input_device()
 
 
 def _input_device_info(device_index=None):
@@ -108,16 +174,16 @@ def _input_device_info(device_index=None):
 
 def _candidate_capture_rates(preferred: int, device_info=None) -> list[int]:
     """
-    ALSA on Raspberry Pi often rejects 16 kHz for I2S / USB mics and only
-    accepts 44100 or 48000. Try preferred first, then device default, then
-    common rates.
+    Voice HAT / I2S on Raspberry Pi usually only accepts 48000 (sometimes
+    44100). Prefer the device default before the MFCC analysis rate.
     """
+    default_rate = int(float(_device_field(device_info, "default_samplerate", 0) or 0))
     rates: list[int] = []
     for rate in (
-        int(preferred),
-        int((device_info or {}).get("default_samplerate") or 0),
+        default_rate,
         48000,
         44100,
+        int(preferred),
         32000,
         22050,
         16000,
@@ -126,6 +192,16 @@ def _candidate_capture_rates(preferred: int, device_info=None) -> list[int]:
         if rate > 0 and rate not in rates:
             rates.append(rate)
     return rates
+
+
+def _candidate_channel_counts(device_info=None) -> list[int]:
+    max_channels = int(_device_field(device_info, "max_input_channels", 1) or 1)
+    channels: list[int] = []
+    # Voice HAT exposes 2 input channels; mono opens often fail.
+    for count in (min(2, max_channels), 1, max_channels):
+        if count > 0 and count not in channels:
+            channels.append(count)
+    return channels
 
 
 def _resample_audio(audio: np.ndarray, capture_rate: int, target_rate: int) -> np.ndarray:
@@ -138,67 +214,107 @@ def _resample_audio(audio: np.ndarray, capture_rate: int, target_rate: int) -> n
     ).astype(np.float32)
 
 
+def _to_mono(audio: np.ndarray) -> np.ndarray:
+    if audio.ndim == 1:
+        return audio
+    # Prefer left channel (INMP441 L/R→GND selects left on many breakouts).
+    return audio[:, 0].astype(np.float32, copy=False)
+
+
 def _open_recording(
     duration: float,
     capture_rate: int,
     device,
+    channels: int,
 ) -> np.ndarray:
     audio = sd.rec(
         int(duration * capture_rate),
         samplerate=capture_rate,
-        channels=1,
+        channels=channels,
         dtype="float32",
         device=device,
     )
     sd.wait()
-    return audio.flatten()
+    return _to_mono(np.asarray(audio))
 
 
 def _record(duration: float = DURATION_SEC, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
     """
     Capture audio from the mic, then return samples at ``sample_rate``.
 
-    Hardware may only support 44.1/48 kHz. We negotiate a working capture
-    rate and resample so MFCC enrolment/verification stay consistent.
+    Google Voice HAT typically needs 48000 Hz stereo. We negotiate a working
+    open, cache it, and resample for MFCC consistency.
     """
-    configured_device = _configured_device_index()
+    global _CAPTURE_CACHE
+
+    configured_device = _resolve_input_device()
     device_info = _input_device_info(configured_device)
+
+    if _CAPTURE_CACHE is not None:
+        try:
+            audio = _open_recording(
+                duration,
+                _CAPTURE_CACHE["rate"],
+                _CAPTURE_CACHE["device"],
+                _CAPTURE_CACHE["channels"],
+            )
+            return _resample_audio(
+                audio, _CAPTURE_CACHE["rate"], sample_rate
+            )
+        except Exception as exc:
+            logger.warning("Cached mic open failed; renegotiating: %s", exc)
+            _CAPTURE_CACHE = None
+
     rates = _candidate_capture_rates(sample_rate, device_info)
+    channels_list = _candidate_channel_counts(device_info)
     logger.info(
-        "Recording %.1fs of audio (analysis=%d Hz, device=%s, try rates=%s)…",
+        "Recording %.1fs (analysis=%d Hz, device=%s, rates=%s, channels=%s)…",
         duration,
         sample_rate,
         configured_device if configured_device is not None else "default",
         rates,
+        channels_list,
     )
 
     last_error = None
     devices_to_try = [configured_device]
     if configured_device is not None:
+        # Also try PortAudio default if the chosen index fails.
         devices_to_try.append(None)
 
     for device in devices_to_try:
-        info = _input_device_info(device) if device is not configured_device else device_info
+        info = device_info if device == configured_device else _input_device_info(device)
         for capture_rate in _candidate_capture_rates(sample_rate, info):
-            try:
-                audio = _open_recording(duration, capture_rate, device)
-                if capture_rate != sample_rate:
-                    logger.info(
-                        "Captured at %d Hz on device %s; resampling to %d Hz",
-                        capture_rate,
-                        device if device is not None else "default",
-                        sample_rate,
+            for channels in _candidate_channel_counts(info):
+                try:
+                    audio = _open_recording(
+                        duration, capture_rate, device, channels
                     )
-                    audio = _resample_audio(audio, capture_rate, sample_rate)
-                return audio
-            except Exception as exc:
-                last_error = exc
-                logger.warning(
-                    "Audio open failed (device=%s, rate=%d): %s",
-                    device if device is not None else "default",
-                    capture_rate,
-                    exc,
-                )
+                    _CAPTURE_CACHE = {
+                        "device": device,
+                        "rate": capture_rate,
+                        "channels": channels,
+                    }
+                    logger.info(
+                        "Mic open OK — device=%s rate=%d channels=%d",
+                        device if device is not None else "default",
+                        capture_rate,
+                        channels,
+                    )
+                    if capture_rate != sample_rate:
+                        audio = _resample_audio(
+                            audio, capture_rate, sample_rate
+                        )
+                    return audio
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Audio open failed (device=%s, rate=%d, ch=%d): %s",
+                        device if device is not None else "default",
+                        capture_rate,
+                        channels,
+                        exc,
+                    )
 
     raise RuntimeError(
         f"No usable microphone sample rate. Last error: {last_error}"

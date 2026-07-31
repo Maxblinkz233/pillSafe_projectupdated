@@ -117,7 +117,7 @@ hotspot:
 # ── Voice Recognition (deferred until INMP441 is fitted) ───────────────────
 voice:
   enabled: true                  # set true only after INMP441 + sounddevice/librosa work
-  # Analysis rate for MFCC. Capture may use 44100/48000 if ALSA rejects 16000,
+  # Analysis rate for MFCC. Capture uses Voice HAT native 48000 Hz when needed,
   # then audio is resampled to this rate automatically.
   sample_rate: 16000
   record_duration_sec: 3          # seconds recorded per utterance
@@ -125,7 +125,9 @@ voice:
   enrol_samples: 3                # utterances captured during enrolment
   similarity_threshold: 0.82      # cosine similarity floor for ACCEPT
   min_rms: 0.015                  # reject recordings quieter than this (blocks silence false-accepts)
-  device_index: null              # null = OS default input; set int for specific device
+  # null = auto-pick Google Voice HAT / first usable input.
+  # Or set explicitly, e.g. device_index: 0 for "snd_rpi_googlevoicehat..."
+  device_index: null
   models_dir: "models/voice"      # where .npy templates are stored
 
 # ── Hardware additions ─────────────────────────────────────────────────────
