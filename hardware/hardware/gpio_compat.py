@@ -131,15 +131,21 @@ class PWM:
         _owned_pins.add(pin)
         _pwm_handles[pin] = self
         if BACKEND == "RPi.GPIO":
+            # RPi.GPIO requires OUT mode before PWM.
+            _RPi_GPIO.setup(pin, _RPi_GPIO.OUT, initial=_RPi_GPIO.LOW)
             self._pwm = _RPi_GPIO.PWM(pin, self.frequency)
         else:
             self._pwm = None
             if BACKEND == "lgpio":
-                # Claim as output before tx_pwm
+                # Single claim for this pin — required before tx_pwm.
                 try:
                     _lgpio.gpio_claim_output(_chip, pin, LOW)
                 except Exception:
-                    pass
+                    try:
+                        _lgpio.gpio_free(_chip, pin)
+                    except Exception:
+                        pass
+                    _lgpio.gpio_claim_output(_chip, pin, LOW)
 
     def start(self, duty: float = 0.0) -> None:
         self._duty = float(duty)

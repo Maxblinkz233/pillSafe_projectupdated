@@ -62,18 +62,19 @@ class Dispenser:
                 gpio.BACKEND, self.pins,
             )
             return
+        # Claim each pin once via PWM only. Calling setup_out() first then
+        # PWM() double-claims the same line under lgpio and raises GPIO busy.
         for compartment, pin in enumerate(self.pins):
             try:
-                gpio.setup_out(pin)
+                pwm = gpio.PWM(pin, self.frequency)
+                pwm.start(0)
+                self._pwms[compartment] = pwm
             except Exception as exc:
                 raise RuntimeError(
                     f"Cannot claim servo GPIO {pin} (compartment {compartment}): "
                     f"{exc}. Check gpioinfo for that pin, or change servo.pins "
                     f"in config.yaml."
                 ) from exc
-            pwm = gpio.PWM(pin, self.frequency)
-            pwm.start(0)
-            self._pwms[compartment] = pwm
         logger.info(
             "MG996R servos on GPIO %s at %d Hz [%s]",
             self.pins, self.frequency, gpio.BACKEND,
