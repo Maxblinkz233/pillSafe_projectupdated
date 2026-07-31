@@ -63,7 +63,14 @@ class Dispenser:
             )
             return
         for compartment, pin in enumerate(self.pins):
-            gpio.setup_out(pin)
+            try:
+                gpio.setup_out(pin)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Cannot claim servo GPIO {pin} (compartment {compartment}): "
+                    f"{exc}. Check gpioinfo for that pin, or change servo.pins "
+                    f"in config.yaml."
+                ) from exc
             pwm = gpio.PWM(pin, self.frequency)
             pwm.start(0)
             self._pwms[compartment] = pwm

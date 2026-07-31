@@ -32,7 +32,7 @@ SERVO0_SIG,Pi,GPIO12 Pin32,R220_0,in,Orange,Optional series 220–470Ω
 SERVO0_SIG,R220_0,out,Servo 0,Signal,Orange,Compartment 0
 SERVO1_SIG,Pi,GPIO13 Pin33,R220_1,in,Orange,
 SERVO1_SIG,R220_1,out,Servo 1,Signal,Orange,Compartment 1
-SERVO2_SIG,Pi,GPIO16 Pin36,R220_2,in,Orange,
+SERVO2_SIG,Pi,GPIO22 Pin15,R220_2,in,Orange,
 SERVO2_SIG,R220_2,out,Servo 2,Signal,Orange,Compartment 2
 SERVO3_SIG,Pi,GPIO17 Pin11,R220_3,in,Orange,
 SERVO3_SIG,R220_3,out,Servo 3,Signal,Orange,Compartment 3

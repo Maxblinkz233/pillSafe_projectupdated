@@ -74,7 +74,7 @@ pillsafe/
 |---------------------|----------|------------|--------------|-----------------------------|
 | Servo — compartment 0 | PWM    | GPIO 12    | Pin 32       | One servo per compartment   |
 | Servo — compartment 1 | PWM    | GPIO 13    | Pin 33       |                             |
-| Servo — compartment 2 | PWM    | GPIO 16    | Pin 36       |                             |
+| Servo — compartment 2 | PWM    | GPIO 22    | Pin 15       | Was GPIO16; sdmode conflict |
 | Servo — compartment 3 | PWM    | GPIO 17    | Pin 11       |                             |
 | Servo — compartment 4 | PWM    | GPIO 26    | Pin 37       |                             |
 | Servo — compartment 5 | PWM    | GPIO 27    | Pin 13       |                             |
@@ -109,7 +109,7 @@ Raspberry Pi 5 GPIO Header (40-pin) — signal pins in BCM numbering
  Servos (MG996R 360° — one rotating cylinder per compartment)
    GPIO12 (Pin 32) ─── Compartment 0 servo signal
    GPIO13 (Pin 33) ─── Compartment 1 servo signal
-   GPIO16 (Pin 36) ─── Compartment 2 servo signal
+   GPIO22 (Pin 15) ─── Compartment 2 servo signal
    GPIO17 (Pin 11) ─── Compartment 3 servo signal
    GPIO26 (Pin 37) ─── Compartment 4 servo signal
    GPIO27 (Pin 13) ─── Compartment 5 servo signal

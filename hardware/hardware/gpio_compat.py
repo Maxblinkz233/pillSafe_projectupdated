@@ -80,7 +80,15 @@ def setup_out(pin: int) -> None:
     """Configure a BCM pin as digital output (idle LOW)."""
     _owned_pins.add(pin)
     if BACKEND == "lgpio":
-        _lgpio.gpio_claim_output(_chip, pin, LOW)
+        try:
+            _lgpio.gpio_claim_output(_chip, pin, LOW)
+        except Exception:
+            # Drop a stale claim from a previous PillSafe run, then retry once.
+            try:
+                _lgpio.gpio_free(_chip, pin)
+            except Exception:
+                pass
+            _lgpio.gpio_claim_output(_chip, pin, LOW)
     elif BACKEND == "RPi.GPIO":
         _RPi_GPIO.setup(pin, _RPi_GPIO.OUT, initial=_RPi_GPIO.LOW)
 

@@ -99,7 +99,7 @@ confirm against the silkscreen on your board).
 | 22 | GPIO 25 | Buzzer signal |
 | 32 | GPIO 12 | Servo compartment 0 signal |
 | 33 | GPIO 13 | Servo compartment 1 signal |
-| 36 | GPIO 16 | Servo compartment 2 signal |
+| 15 | GPIO 22 | Servo compartment 2 signal |
 | 37 | GPIO 26 | Servo compartment 4 signal |
 | CSI | Camera connector | Pi Camera ribbon |
 
@@ -204,7 +204,7 @@ Each servo has three wires (typical colour):
 |-------------|------------|--------------|----------|
 | 0 | GPIO 12 | 32 | VCC→5 V PSU, GND→bus |
 | 1 | GPIO 13 | 33 | same |
-| 2 | GPIO 16 | 36 | same |
+| 2 | GPIO 22 | 15 | same |
 | 3 | GPIO 17 | 11 | same |
 | 4 | GPIO 26 | 37 | same |
 | 5 | GPIO 27 | 13 | same |
@@ -346,7 +346,7 @@ Use this as a wire-by-wire checklist. Suggested colours match
 |---|------|-----|----|
 | S0 | Pi Pin 32 (GPIO 12) | 220–470 Ω (opt) | Servo 0 Signal |
 | S1 | Pi Pin 33 (GPIO 13) | 220–470 Ω (opt) | Servo 1 Signal |
-| S2 | Pi Pin 36 (GPIO 16) | 220–470 Ω (opt) | Servo 2 Signal |
+| S2 | Pi Pin 15 (GPIO 22) | 220–470 Ω (opt) | Servo 2 Signal |
 | S3 | Pi Pin 11 (GPIO 17) | 220–470 Ω (opt) | Servo 3 Signal |
 | S4 | Pi Pin 37 (GPIO 26) | 220–470 Ω (opt) | Servo 4 Signal |
 | S5 | Pi Pin 13 (GPIO 27) | 220–470 Ω (opt) | Servo 5 Signal |
