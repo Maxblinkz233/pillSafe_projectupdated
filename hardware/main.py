@@ -765,8 +765,8 @@ class PillSafeSystem:
         # Silence dose-due alert before any motor movement.
         self.buzzer.stop()
 
-        # Servo moves ONLY after verification accepted — to the medication slot
-        rotated = self.dispenser.dispense(event.compartment_index, event.slot_index)
+        # Servo advances one 40° slot after verification (not a 180° end-stop swing)
+        rotated = self.dispenser.dispense(event.compartment_index)
         if not rotated:
             self._handle_mechanical_error(event, auth_mode=auth_mode)
             return False

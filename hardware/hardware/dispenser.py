@@ -15,8 +15,10 @@ GPIO Wiring (BCM numbering, one signal pin per compartment):
 Modes (config servo.mode):
   - continuous (default): timed 40° steps. Neutral duty stops the motor.
     Use this for 360° / continuous-rotation MG996R (or modified 180° units).
-  - positional: absolute PWM angles. Use only with true position servos;
-    set servo.travel_degrees to the real mechanical range (usually 180).
+    PWM starts at neutral — never from 0%, which makes positional MG996Rs
+    slam to ~180° instead of a 40° step. Tune slot_pulse_seconds live.
+  - positional: absolute/relative PWM angles. Use only with true position
+    servos; set servo.travel_degrees to the real mechanical range (usually 180).
 """
 
 from __future__ import annotations
@@ -277,15 +279,23 @@ class Dispenser:
 
         current = self._current_slot.get(compartment_index, 0)
         if self.mode == "positional":
-            target_angle = self._slot_angle(slot_index)
-            if target_angle > self.travel_degrees + 0.1:
-                logger.error(
-                    "Slot %d needs %.1f° but positional travel is only %.1f°. "
-                    "Use servo.mode: continuous for a 9-slot / 360° cylinder.",
-                    slot_index, target_angle, self.travel_degrees,
-                )
-                return False
-            ok = self._rotate_positional_to_angle(compartment_index, target_angle)
+            delta_slots = self._shortest_slot_delta(current, slot_index)
+            degrees = delta_slots * self.angle_per_slot
+            # Prefer relative stepping so each dose is +40°, not a jump that
+            # can look like a full 180° end-stop throw from an unknown start.
+            if abs(delta_slots) <= 1:
+                ok = self._rotate_positional_by_degrees(compartment_index, degrees)
+            else:
+                target_angle = self._slot_angle(slot_index)
+                if target_angle > self.travel_degrees + 0.1:
+                    logger.error(
+                        "Slot %d needs %.1f° but positional travel is only %.1f°. "
+                        "Use servo.mode: continuous for a 9-slot / 360° cylinder, "
+                        "or dispense one 40° step at a time.",
+                        slot_index, target_angle, self.travel_degrees,
+                    )
+                    return False
+                ok = self._rotate_positional_to_angle(compartment_index, target_angle)
         else:
             delta_slots = self._shortest_slot_delta(current, slot_index)
             degrees = delta_slots * self.angle_per_slot
@@ -303,9 +313,24 @@ class Dispenser:
             )
         return ok
 
-    def dispense(self, compartment_index: int, slot_index: int = 0) -> bool:
-        """Post-verification move to the medication slot (40° × steps)."""
-        return self.rotate_to(compartment_index, slot_index)
+    def advance(self, compartment_index: int, slots: int = 1) -> bool:
+        """Advance ``slots`` pockets (default 1 → one 40° step)."""
+        current = self._current_slot.get(compartment_index, 0)
+        target = (int(current) + int(slots)) % self.num_slots
+        return self.rotate_to(compartment_index, target)
+
+    def dispense(self, compartment_index: int, slot_index: int | None = None) -> bool:
+        """
+        Post-verification move.
+
+        - If ``slot_index`` is None (preferred): advance ``dispense_slots``
+          (default 1 → exactly 40°).
+        - If ``slot_index`` is given: rotate to that absolute magazine slot
+          (may be multiple 40° steps).
+        """
+        if slot_index is None:
+            return self.advance(compartment_index, self.dispense_slots)
+        return self.rotate_to(compartment_index, int(slot_index))
 
     def home(self, compartment_index: int | None = None) -> None:
         """Return one compartment (or all) to slot 0."""

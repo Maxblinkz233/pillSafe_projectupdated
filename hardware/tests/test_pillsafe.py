@@ -94,8 +94,10 @@ def test_dispenser_dispense_uses_slot_angle():
     from hardware.dispenser import Dispenser
     d = Dispenser()
     assert d.num_slots == 9
-    assert d.dispense(0, 2) is True  # two 40° steps from slot 0
+    assert d.rotate_to(0, 2) is True  # two 40° steps from slot 0
     assert d.current_slot(0) == 2
+    assert d.dispense(0) is True  # one more 40° step → slot 3
+    assert d.current_slot(0) == 3
 
 
 def test_dispenser_rejects_bad_indices():
@@ -105,6 +107,18 @@ def test_dispenser_rejects_bad_indices():
     assert d.rotate_to(0, 99) is False
     assert d.rotate_to(0, 1) is True
     assert d.current_slot(0) == 1
+
+
+def test_dispenser_move_duration_one_slot():
+    from hardware.dispenser import Dispenser
+    d = Dispenser()
+    d.slot_pulse_seconds = 0.20
+    d.angle_per_slot = 40.0
+    assert d._move_duration_seconds(40) == pytest.approx(0.20)
+    assert d._move_duration_seconds(80) == pytest.approx(0.40)
+    d.slot_pulse_seconds = None
+    d.degrees_per_second = 200.0
+    assert d._move_duration_seconds(40) == pytest.approx(0.20)
 
 
 # ── Database: schedules, inventory, notifications ────────────────────────────

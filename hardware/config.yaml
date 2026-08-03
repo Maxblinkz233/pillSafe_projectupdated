@@ -42,14 +42,18 @@ servo:
   num_compartments: 6
   num_slots: 9
   angle_per_slot: 40                 # degrees moved per slot step
-  # continuous = timed 40° steps (correct for 360° / continuous MG996R)
-  # positional = absolute PWM (only if your servo is a true 0–180° position unit)
+  dispense_slots: 1                  # each verify advances exactly one slot (40°)
+  # continuous = timed 40° steps (correct for 360° / continuous-rotation MG996R)
+  # positional = absolute/relative PWM (true 0–180° position servos only)
   mode: continuous
   pins: [12, 13, 22, 17, 26, 27]
-  # Continuous-rotation calibration — tune degrees_per_second so one slot ≈ 40°.
+  # Continuous-rotation calibration — tune so ONE slot ≈ 40° (not ~180°).
+  # If the horn swings ~180°, PWM was likely starting at 0% (fixed in code) OR
+  # the pulse is too long: raise degrees_per_second or lower slot_pulse_seconds.
   neutral_duty: 7.5                  # stop (≈ 1.5 ms pulse at 50 Hz)
-  run_duty_offset: 2.5               # ± from neutral while turning
-  degrees_per_second: 50             # raise if moves <40°, lower if >40°
+  run_duty_offset: 1.5               # keep modest; large values slam positional units
+  degrees_per_second: 200            # was 50 (too slow → ~180° overshoot); tune live
+  slot_pulse_seconds: 0.20           # direct run time for one 40° step; easiest knob
   settle_time: 0.15
   # Positional-only settings (ignored in continuous mode)
   travel_degrees: 180
