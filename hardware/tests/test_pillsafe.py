@@ -112,13 +112,29 @@ def test_dispenser_rejects_bad_indices():
 def test_dispenser_move_duration_one_slot():
     from hardware.dispenser import Dispenser
     d = Dispenser()
-    d.slot_pulse_seconds = 0.20
+    d.pinion_teeth = 17
+    d.compartment_teeth = 135
+    d.gear_ratio = 135 / 17
     d.angle_per_slot = 40.0
+    # 40° compartment → 40 × 135/17 ≈ 317.647° at the servo
+    assert d.compartment_to_servo_degrees(40) == pytest.approx(40 * 135 / 17)
+    d.slot_pulse_seconds = 0.20
     assert d._move_duration_seconds(40) == pytest.approx(0.20)
     assert d._move_duration_seconds(80) == pytest.approx(0.40)
     d.slot_pulse_seconds = None
     d.degrees_per_second = 200.0
-    assert d._move_duration_seconds(40) == pytest.approx(0.20)
+    assert d._move_duration_seconds(40) == pytest.approx((40 * 135 / 17) / 200.0)
+
+
+def test_dispenser_gear_ratio_17_135():
+    from hardware.dispenser import Dispenser
+    d = Dispenser()
+    d.pinion_teeth = 17
+    d.compartment_teeth = 135
+    d.gear_ratio = 135 / 17
+    assert d.gear_ratio == pytest.approx(135 / 17)
+    # One dose slot on the compartment
+    assert d.compartment_to_servo_degrees(40) == pytest.approx(317.647, abs=0.01)
 
 
 # ── Database: schedules, inventory, notifications ────────────────────────────

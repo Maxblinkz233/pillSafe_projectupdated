@@ -13,10 +13,10 @@ GPIO Wiring (BCM numbering, one signal pin per compartment):
   - Each servo GND → common GND with the Pi (and the external PSU)
 
 Modes (config servo.mode):
-  - continuous (default): timed 40° steps. Neutral duty stops the motor.
-    Use this for 360° / continuous-rotation MG996R (or modified 180° units).
-    PWM starts at neutral — never from 0%, which makes positional MG996Rs
-    slam to ~180° instead of a 40° step. Tune slot_pulse_seconds live.
+  - continuous (default): timed steps. Neutral duty stops the motor.
+    Compartment angle (e.g. 40°/slot) is converted to motor degrees via the
+    pinion:ring gear ratio (servo° = compartment° × ring_teeth / pinion_teeth).
+    PWM starts at neutral — never from 0%. Tune degrees_per_second live.
   - positional: absolute/relative PWM angles. Use only with true position
     servos; set servo.travel_degrees to the real mechanical range (usually 180).
 """
@@ -44,24 +44,33 @@ class Dispenser:
         self.min_duty = float(servo.min_duty)
         self.max_duty = float(servo.max_duty)
         self.hold_time = float(servo.hold_time)
+        # Compartment (ring gear) angle per dose slot — not the servo horn angle.
         self.angle_per_slot = float(getattr(servo, "angle_per_slot", 40.0))
         self.mode = str(getattr(servo, "mode", "continuous")).strip().lower()
         # Physical PWM range of a positional servo (almost always 180°).
         self.travel_degrees = float(getattr(servo, "travel_degrees", 180.0))
-        # Continuous-rotation calibration.
+        # Gear train: servo pinion → compartment ring.
+        # θ_servo = θ_compartment × (compartment_teeth / pinion_teeth)
+        self.pinion_teeth = max(1, int(getattr(servo, "pinion_teeth", 17)))
+        self.compartment_teeth = max(
+            1, int(getattr(servo, "compartment_teeth", 135))
+        )
+        self.gear_ratio = self.compartment_teeth / float(self.pinion_teeth)
+        # Continuous-rotation calibration (servo shaft speed, after gearing).
         self.neutral_duty = float(getattr(servo, "neutral_duty", 7.5))
         # Keep offset modest — large offsets slam positional MG996Rs toward 0°/180°.
         self.run_duty_offset = float(getattr(servo, "run_duty_offset", 1.5))
         self.degrees_per_second = float(
             getattr(servo, "degrees_per_second", 200.0)
         )
-        # Prefer explicit one-slot pulse time when set (easiest calibration).
+        # Optional override: run time for ONE compartment slot (40° on the ring).
+        # When unset, duration = (compartment° × gear_ratio) / degrees_per_second.
         raw_pulse = getattr(servo, "slot_pulse_seconds", None)
         self.slot_pulse_seconds = (
             float(raw_pulse) if raw_pulse not in (None, "", 0, 0.0) else None
         )
         self.settle_time = float(getattr(servo, "settle_time", 0.15))
-        # Each successful verify advances this many slots (normally 1 → 40°).
+        # Each successful verify advances this many slots (normally 1 → 40° ring).
         self.dispense_slots = max(1, int(getattr(servo, "dispense_slots", 1)))
 
         pins = getattr(servo, "pins", None)
@@ -81,10 +90,14 @@ class Dispenser:
         self._current_angle: dict[int, float] = {}
         self._setup_gpio()
         logger.info(
-            "Dispenser mode=%s, %.1f°/slot, travel=%.0f°, dps=%.1f, pulse=%s",
+            "Dispenser mode=%s, compartment %.1f deg/slot -> servo %.1f deg/slot "
+            "(pinion %dT : ring %dT, ratio %.3f:1), dps=%.1f, pulse=%s",
             self.mode,
             self.angle_per_slot,
-            self.travel_degrees,
+            self.compartment_to_servo_degrees(self.angle_per_slot),
+            self.pinion_teeth,
+            self.compartment_teeth,
+            self.gear_ratio,
             self.degrees_per_second,
             f"{self.slot_pulse_seconds:.3f}s" if self.slot_pulse_seconds else "auto",
         )
@@ -115,12 +128,25 @@ class Dispenser:
             self.pins, self.frequency, gpio.BACKEND, self.neutral_duty,
         )
 
-    def _move_duration_seconds(self, degrees: float) -> float:
-        """How long to run a continuous-rotation servo for ``degrees``."""
-        deg = abs(float(degrees))
+    def compartment_to_servo_degrees(self, compartment_degrees: float) -> float:
+        """
+        Convert ring/compartment rotation to servo-shaft rotation.
+
+        θ_servo = θ_compartment × (compartment_teeth / pinion_teeth)
+
+        Example (17T pinion, 135T ring, 40° compartment slot):
+            θ_servo = 40 × (135/17) ≈ 317.65°
+        """
+        return float(compartment_degrees) * self.gear_ratio
+
+    def _move_duration_seconds(self, compartment_degrees: float) -> float:
+        """How long to run the continuous servo for a compartment angle."""
+        deg = abs(float(compartment_degrees))
         if self.slot_pulse_seconds is not None and self.angle_per_slot > 0:
+            # Explicit pulse = time for one compartment slot (40° on the ring).
             return self.slot_pulse_seconds * (deg / self.angle_per_slot)
-        return deg / max(1.0, self.degrees_per_second)
+        servo_deg = self.compartment_to_servo_degrees(deg)
+        return servo_deg / max(1.0, self.degrees_per_second)
 
     def _slot_angle(self, slot_index: int) -> float:
         return round(slot_index * self.angle_per_slot, 1)
@@ -160,7 +186,13 @@ class Dispenser:
     def _rotate_continuous_by_degrees(
         self, compartment_index: int, degrees: float
     ) -> bool:
-        """Timed move for continuous-rotation / 360° MG996R units."""
+        """
+        Timed move for continuous-rotation MG996R units.
+
+        ``degrees`` is the **compartment / ring** angle. Motor run time uses
+        the pinion:ring gear ratio so one 40° slot on the cylinder becomes
+        ≈317.65° at the servo for a 17T:135T mesh.
+        """
         if abs(degrees) < 0.5:
             return True
         pwm = self._pwms.get(compartment_index)
@@ -173,15 +205,22 @@ class Dispenser:
         # positional MG996Rs and cause a full end-to-end swing.
         run_duty = self.neutral_duty + direction * self.run_duty_offset
         run_duty = max(self.min_duty + 0.5, min(self.max_duty - 0.5, run_duty))
+        servo_degrees = self.compartment_to_servo_degrees(degrees)
         duration = self._move_duration_seconds(degrees)
 
         logger.info(
-            "Compartment %d continuous rotate %+.1f° (duty %.2f%%, %.2fs)",
-            compartment_index, degrees, run_duty, duration,
+            "Compartment %d ring %+.1f deg -> servo %+.1f deg "
+            "(duty %.2f%%, %.2fs, ratio %.3f:1)",
+            compartment_index,
+            degrees,
+            servo_degrees,
+            run_duty,
+            duration,
+            self.gear_ratio,
         )
 
         if not gpio.AVAILABLE:
-            time.sleep(min(duration, 2.0))
+            time.sleep(min(duration, 5.0))
             return True
 
         # Always arm at neutral first so the first edge is a short speed pulse,
