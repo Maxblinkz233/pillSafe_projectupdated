@@ -48,11 +48,19 @@ class Dispenser:
         self.travel_degrees = float(getattr(servo, "travel_degrees", 180.0))
         # Continuous-rotation calibration.
         self.neutral_duty = float(getattr(servo, "neutral_duty", 7.5))
-        self.run_duty_offset = float(getattr(servo, "run_duty_offset", 2.5))
+        # Keep offset modest — large offsets slam positional MG996Rs toward 0°/180°.
+        self.run_duty_offset = float(getattr(servo, "run_duty_offset", 1.5))
         self.degrees_per_second = float(
-            getattr(servo, "degrees_per_second", 50.0)
+            getattr(servo, "degrees_per_second", 200.0)
+        )
+        # Prefer explicit one-slot pulse time when set (easiest calibration).
+        raw_pulse = getattr(servo, "slot_pulse_seconds", None)
+        self.slot_pulse_seconds = (
+            float(raw_pulse) if raw_pulse not in (None, "", 0, 0.0) else None
         )
         self.settle_time = float(getattr(servo, "settle_time", 0.15))
+        # Each successful verify advances this many slots (normally 1 → 40°).
+        self.dispense_slots = max(1, int(getattr(servo, "dispense_slots", 1)))
 
         pins = getattr(servo, "pins", None)
         if not pins:
@@ -68,13 +76,15 @@ class Dispenser:
 
         self._pwms: dict[int, gpio.PWM] = {}
         self._current_slot: dict[int, int] = {}
+        self._current_angle: dict[int, float] = {}
         self._setup_gpio()
         logger.info(
-            "Dispenser mode=%s, %.1f°/slot, travel=%.0f°, dps=%.1f",
+            "Dispenser mode=%s, %.1f°/slot, travel=%.0f°, dps=%.1f, pulse=%s",
             self.mode,
             self.angle_per_slot,
             self.travel_degrees,
             self.degrees_per_second,
+            f"{self.slot_pulse_seconds:.3f}s" if self.slot_pulse_seconds else "auto",
         )
 
     def _setup_gpio(self) -> None:
@@ -85,10 +95,13 @@ class Dispenser:
             )
             return
         # Claim each pin once via PWM only (avoid double-claim under lgpio).
+        # Start at neutral (≈1.5 ms) — NOT 0%. Duty 0 then a high run duty makes
+        # a standard positional MG996R slam to ~180° instead of a 40° step.
         for compartment, pin in enumerate(self.pins):
             try:
                 pwm = gpio.PWM(pin, self.frequency)
-                pwm.start(0)
+                pwm.start(self.neutral_duty)
+                time.sleep(self.settle_time)
                 self._pwms[compartment] = pwm
             except Exception as exc:
                 raise RuntimeError(
@@ -96,9 +109,16 @@ class Dispenser:
                     f"{exc}"
                 ) from exc
         logger.info(
-            "MG996R servos on GPIO %s at %d Hz [%s]",
-            self.pins, self.frequency, gpio.BACKEND,
+            "MG996R servos on GPIO %s at %d Hz [%s] (started at neutral %.1f%%)",
+            self.pins, self.frequency, gpio.BACKEND, self.neutral_duty,
         )
+
+    def _move_duration_seconds(self, degrees: float) -> float:
+        """How long to run a continuous-rotation servo for ``degrees``."""
+        deg = abs(float(degrees))
+        if self.slot_pulse_seconds is not None and self.angle_per_slot > 0:
+            return self.slot_pulse_seconds * (deg / self.angle_per_slot)
+        return deg / max(1.0, self.degrees_per_second)
 
     def _slot_angle(self, slot_index: int) -> float:
         return round(slot_index * self.angle_per_slot, 1)
@@ -147,9 +167,11 @@ class Dispenser:
             return False
 
         direction = 1.0 if degrees > 0 else -1.0
+        # Modest offset: extreme duties (≈2.5% / 12.5%) look like 0°/180° on
+        # positional MG996Rs and cause a full end-to-end swing.
         run_duty = self.neutral_duty + direction * self.run_duty_offset
-        run_duty = max(self.min_duty, min(self.max_duty, run_duty))
-        duration = abs(float(degrees)) / max(1.0, self.degrees_per_second)
+        run_duty = max(self.min_duty + 0.5, min(self.max_duty - 0.5, run_duty))
+        duration = self._move_duration_seconds(degrees)
 
         logger.info(
             "Compartment %d continuous rotate %+.1f° (duty %.2f%%, %.2fs)",
@@ -160,6 +182,10 @@ class Dispenser:
             time.sleep(min(duration, 2.0))
             return True
 
+        # Always arm at neutral first so the first edge is a short speed pulse,
+        # not a jump from PWM-off (0%) to a high duty (≈180° on positional units).
+        pwm.ChangeDutyCycle(self.neutral_duty)
+        time.sleep(self.settle_time)
         pwm.ChangeDutyCycle(run_duty)
         time.sleep(duration)
         self._stop_pwm(pwm)
@@ -178,6 +204,7 @@ class Dispenser:
 
         if not gpio.AVAILABLE:
             time.sleep(self.hold_time)
+            self._current_angle[compartment_index] = target_angle
             return True
 
         pwm = self._pwms.get(compartment_index)
@@ -186,8 +213,24 @@ class Dispenser:
             return False
         pwm.ChangeDutyCycle(duty)
         time.sleep(self.hold_time)
-        pwm.ChangeDutyCycle(0)
+        # Hold position (do not drop to 0% — that can twitch toward an end-stop).
+        self._current_angle[compartment_index] = target_angle
         return True
+
+    def _rotate_positional_by_degrees(
+        self, compartment_index: int, degrees: float
+    ) -> bool:
+        """Relative step for positional servos (e.g. +40° per dose)."""
+        current = float(self._current_angle.get(compartment_index, 0.0))
+        target = current + float(degrees)
+        # Keep within mechanical travel; wrap if the mechanism allows multi-turn
+        # indexing in software only (PWM still clamped to travel_degrees).
+        travel = max(1.0, self.travel_degrees)
+        while target > travel:
+            target -= travel
+        while target < 0.0:
+            target += travel
+        return self._rotate_positional_to_angle(compartment_index, target)
 
     def rotate_to_angle(self, compartment_index: int, angle: float) -> bool:
         """
