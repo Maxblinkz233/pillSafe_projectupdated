@@ -98,8 +98,11 @@ buzzer:
 alerts:
   serial_port: "/dev/serial0"
   baud_rate: 9600
-  max_sms_per_event: 2
-  retry_interval_minutes: 60
+  # Hub GSM (SIM800L/C) is primary. If GSM send fails, the hub queues a
+  # PENDING_PHONE_SMS notification; the React Native app sends the same text
+  # via Africa's Talking using the phone's internet (see Device Connection).
+  max_sms_per_event: 2              # max texts per event key
+  retry_interval_minutes: 60        # wait before a 2nd SMS (MISSED/REJECTED)
   sms_timeout: 10
 
 # --- Flask REST API ---

@@ -295,12 +295,22 @@ journalctl -u pillsafe -f           # live logs
 > If your username isn't `pi`, edit `User=` and the paths in
 > `/etc/systemd/system/pillsafe.service`, then `daemon-reload` and restart.
 
+## SMS path (GSM primary + phone Africa’s Talking fallback)
+
+1. Hub tries **SIM800L/C** over `/dev/serial0` for caregiver SMS.
+2. If GSM fails (module down, no signal, AT error), the hub inserts a notification of type **`PENDING_PHONE_SMS`** with JSON `{ "to", "body", "reason" }`.
+3. The React Native app poller (while connected to the hub) detects that notification and calls **Africa’s Talking** from the **phone** (needs mobile data / internet). Credentials are **baked into** [`src/config/africasTalking.js`](../src/config/africasTalking.js) by the developer — end users never enter them.
+4. After a successful AT send, the app marks the notification read.
+
+End users only know: dose events notify the caregiver by SMS. They set the caregiver phone on the patient profile; they do not configure Africa’s Talking.
+
 ### Step 15 — Connect the mobile app
 1. Connect the phone to the Pi's Wi-Fi (`PillSafe-AP`) or the same LAN.
 2. Open the **React Native** PillSafe app → **Settings → Device Connection**.
 3. Set the API base URL (`http://192.168.4.1:5000` for the hotspot) and the Bearer token from Step 9.
-4. Tap **Test Connection**, select the patient user, then **Save**.
-5. Create users/schedules (API or enrolment CLI), then use **Verify → Verify Now** at dose time.
+4. Optionally set Africa’s Talking credentials in `src/config/africasTalking.js` before building (developers only — not shown in the app UI).
+5. Tap **Test Connection**, select the patient user, then **Save**.
+6. Create users/schedules (API or enrolment CLI), then use **Verify → Verify Now** at dose time.
 
 See [`../DEMO.md`](../DEMO.md) for a full viva/demo checklist, and run a dry-run with:
 
@@ -317,7 +327,7 @@ python3 scripts/dry_run_demo.py --base-url http://192.168.4.1:5000 --token YOUR_
 | RTC not found | `i2cdetect -y 1` shows nothing at 0x68 → re-check SDA/SCL/power; is I2C enabled? |
 | "TFLite model not loaded" | Run Step 7; confirm `data/models/mobilefacenet.tflite` exists |
 | Camera errors | `libcamera-hello`; ensure the CSI ribbon is seated and Camera is enabled |
-| No SMS sent | `ls -l /dev/serial0` matches `alerts.serial_port`; SIM800C LiPo + shared GND + 3.3V UART |
+| No SMS sent | `ls -l /dev/serial0` matches `alerts.serial_port`; SIM800C LiPo + shared GND + 3.3V UART. If GSM fails, hub queues `PENDING_PHONE_SMS` — ensure `src/config/africasTalking.js` has a real API key and the phone has mobile data |
 | Servos jitter / brown-out | External 5V ≥5–6 A for MG996R; share GND; raise `servo.hold_time` if needed |
 | Voice disabled at start | Expected while `voice.enabled: false`; else install sounddevice/librosa + INMP441 |
 | Service won't start | `journalctl -u pillsafe -e`; verify `User=`/paths in the unit file |

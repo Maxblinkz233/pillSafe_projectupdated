@@ -671,12 +671,20 @@ class PillSafeSystem:
         )
 
         if sets == sms_after and event.schedule_id not in self._reject_sms_sent:
-            self._sms_reject_warning(event, sets)
+            self.alert_service.send_reject_warning(
+                user_id=event.user_id,
+                schedule_id=event.schedule_id,
+                patient_name=event.full_name,
+                medication_name=event.medication_name,
+                scheduled_time=event.scheduled_time,
+                sets=sets,
+            )
             self._reject_sms_sent.add(event.schedule_id)
 
         if sets >= lockout_after:
-            # Caregiver already SMS'd at set 3 — lock without a second SMS
-            self._log_and_alert_rejected(event, auth_mode=auth_mode, send_sms=False)
+            # Caregiver already SMS'd at set 3 — lock; REJECTED SMS still gated
+            # by AlertService max_sms_per_event / retry_interval.
+            self._log_and_alert_rejected(event, auth_mode=auth_mode, send_sms=True)
             return {
                 "lockout": True,
                 "sets": sets,
@@ -705,25 +713,6 @@ class PillSafeSystem:
                 f"Stand in front of the hub camera and try again.{sms_note}"
             ),
         }
-
-    def _sms_reject_warning(self, event: DispenseEvent, sets: int) -> None:
-        """SMS caregiver after the configured reject threshold (default: 3rd fail)."""
-        try:
-            user = self.db.get_user(event.user_id)
-            if not user or not user.get("caregiver_phone"):
-                return
-            message = (
-                f"[PillSafe ALERT] Face verification failed {sets} times\n"
-                f"Patient: {event.full_name}\n"
-                f"Medication: {event.medication_name}\n"
-                f"Scheduled: {event.scheduled_time}\n"
-                f"Dispensing not locked yet — further attempts allowed."
-            )
-            self.gsm.send_sms(user["caregiver_phone"], message)
-            logger.info("Reject-warning SMS sent after set %d for schedule %d",
-                        sets, event.schedule_id)
-        except Exception as e:
-            logger.error("Reject-warning SMS failed: %s", e)
 
     def _consume_verify_request(self, event: DispenseEvent) -> dict | None:
         """Return and clear a pending Verify-Now request for this event."""
@@ -795,7 +784,7 @@ class PillSafeSystem:
                 logger.debug("Optional IR check skipped: %s", e)
 
         actual_time = datetime.now().strftime("%H:%M")
-        self.db.log_event(
+        log_id = self.db.log_event(
             user_id=event.user_id,
             schedule_id=event.schedule_id,
             scheduled_time=event.scheduled_time,
@@ -809,29 +798,20 @@ class PillSafeSystem:
             f"{event.medication_name} dispensed to {event.full_name} at {actual_time}",
             user_id=event.user_id,
         )
-        self._sms_dose_taken(event, actual_time)
+        self.alert_service.send_immediate_alert(
+            event.user_id,
+            event.schedule_id,
+            "TAKEN",
+            event.scheduled_time,
+            actual_time=actual_time,
+            log_id=log_id,
+        )
         logger.info(
             "Dose TAKEN by user %d at %s (compartment %d, slot %d ≈ %.0f°)",
             event.user_id, actual_time, event.compartment_index,
             event.slot_index, event.slot_index * 40.0,
         )
         return True
-
-    def _sms_dose_taken(self, event: DispenseEvent, actual_time: str) -> None:
-        """SMS caregiver when the patient successfully takes their medicine."""
-        try:
-            user = self.db.get_user(event.user_id)
-            if not user or not user.get("caregiver_phone"):
-                return
-            self.gsm.send_taken_dose_alert(
-                patient_name=event.full_name,
-                medication_name=event.medication_name,
-                scheduled_time=event.scheduled_time,
-                actual_time=actual_time,
-                caregiver_phone=user["caregiver_phone"],
-            )
-        except Exception as e:
-            logger.error("Taken-dose SMS failed: %s", e)
 
     def _update_inventory_after_dispense(self, event: DispenseEvent) -> None:
         """Decrement slot inventory and raise a low-stock alert if needed."""
@@ -857,17 +837,17 @@ class PillSafeSystem:
                    f"— {new_count} pill(s) left")
             logger.warning(msg)
             self._notify("LOW_INVENTORY", msg, user_id=event.user_id)
-            try:
-                user = self.db.get_user(event.user_id)
-                if user and user.get("caregiver_phone"):
-                    self.gsm.send_sms(user["caregiver_phone"], "[PillSafe] " + msg)
-            except Exception as e:
-                logger.error("Low-inventory SMS failed: %s", e)
+            self.alert_service.send_low_inventory(
+                event.user_id,
+                event.compartment_index,
+                event.slot_index,
+                msg,
+            )
 
     def _log_and_alert_rejected(self, event: DispenseEvent, auth_mode: str = "face",
                                  send_sms: bool = True) -> None:
         logger.warning("Verification REJECTED for user %d — lockout", event.user_id)
-        self.db.log_event(
+        log_id = self.db.log_event(
             user_id=event.user_id,
             schedule_id=event.schedule_id,
             scheduled_time=event.scheduled_time,
@@ -881,12 +861,16 @@ class PillSafeSystem:
         )
         if send_sms:
             self.alert_service.send_immediate_alert(
-                event.user_id, event.schedule_id, "REJECTED", event.scheduled_time,
+                event.user_id,
+                event.schedule_id,
+                "REJECTED",
+                event.scheduled_time,
+                log_id=log_id,
             )
 
     def _log_and_alert_missed(self, event: DispenseEvent, auth_mode: str | None = None) -> None:
         logger.warning("Grace period expired — dose MISSED for user %d", event.user_id)
-        self.db.log_event(
+        log_id = self.db.log_event(
             user_id=event.user_id,
             schedule_id=event.schedule_id,
             scheduled_time=event.scheduled_time,
@@ -900,7 +884,11 @@ class PillSafeSystem:
             user_id=event.user_id,
         )
         self.alert_service.send_immediate_alert(
-            event.user_id, event.schedule_id, "MISSED", event.scheduled_time,
+            event.user_id,
+            event.schedule_id,
+            "MISSED",
+            event.scheduled_time,
+            log_id=log_id,
         )
 
     def _notify(self, type: str, message: str, user_id: int | None = None) -> None:

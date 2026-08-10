@@ -78,9 +78,18 @@ class GSMModule:
 
     def send_sms(self, phone_number: str, message: str) -> bool:
         logger.info("SMS to %s: %s", phone_number, message[:50])
-        if not SERIAL_AVAILABLE or self._serial is None:
-            logger.info("[SIM] SMS sent to %s", phone_number)
+        # Dev PCs without pyserial: simulate success so unit tests pass.
+        if not SERIAL_AVAILABLE:
+            logger.info("[SIM] SMS simulated (no pyserial) to %s", phone_number)
             return True
+        # Pi / real deploy: no open port or module silent → fail so the app
+        # can fall back to Africa's Talking from the phone.
+        if self._serial is None or not self._initialised:
+            logger.warning(
+                "GSM unavailable (port=%s, initialised=%s) — SMS not sent",
+                self.port, self._initialised,
+            )
+            return False
         ok, _ = self._send_at("AT+CMGF=1")
         if not ok:
             return False
@@ -143,7 +152,9 @@ class GSMModule:
 
     @property
     def is_available(self) -> bool:
-        return self._initialised or not SERIAL_AVAILABLE
+        if not SERIAL_AVAILABLE:
+            return False  # no pyserial — treat GSM as unavailable for health
+        return bool(self._initialised)
 
     def cleanup(self):
         if self._serial and self._serial.is_open:

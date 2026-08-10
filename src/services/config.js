@@ -5,6 +5,9 @@ const KEYS = {
   token: '@pillsafe/api_token',
   userId: '@pillsafe/user_id',
   userName: '@pillsafe/user_name',
+  caregiverName: '@pillsafe/caregiver_name',
+  caregiverPhone: '@pillsafe/caregiver_phone',
+  signedIn: '@pillsafe/signed_in',
 };
 
 export const DEFAULT_BASE_URL = 'http://10.0.2.2:5000';
@@ -15,7 +18,7 @@ export function getApiBaseUrlCandidates(baseUrl = DEFAULT_BASE_URL) {
   const seen = new Set();
   const candidates = [];
 
-  const addCandidate = (value) => {
+  const addCandidate = value => {
     if (!value) return;
     const normalizedValue = String(value).trim().replace(/\/$/, '');
     if (!normalizedValue || seen.has(normalizedValue)) return;
@@ -32,40 +35,60 @@ export function getApiBaseUrlCandidates(baseUrl = DEFAULT_BASE_URL) {
 }
 
 export async function getApiConfig() {
-  const [baseUrl, token, userId, userName] = await AsyncStorage.multiGet([
+  const rows = await AsyncStorage.multiGet([
     KEYS.baseUrl,
     KEYS.token,
     KEYS.userId,
     KEYS.userName,
+    KEYS.caregiverName,
+    KEYS.caregiverPhone,
+    KEYS.signedIn,
   ]);
+  const map = Object.fromEntries(rows);
 
   return {
-    baseUrl: (baseUrl[1] || DEFAULT_BASE_URL).replace(/\/$/, ''),
-    token: token[1] || DEFAULT_TOKEN,
-    userId: userId[1] ? Number(userId[1]) : null,
-    userName: userName[1] || null,
+    baseUrl: (map[KEYS.baseUrl] || DEFAULT_BASE_URL).replace(/\/$/, ''),
+    token: map[KEYS.token] || DEFAULT_TOKEN,
+    userId: map[KEYS.userId] ? Number(map[KEYS.userId]) : null,
+    userName: map[KEYS.userName] || null,
+    caregiverName: map[KEYS.caregiverName] || null,
+    caregiverPhone: map[KEYS.caregiverPhone] || null,
+    signedIn: map[KEYS.signedIn] === '1',
   };
 }
 
-export async function saveApiConfig({baseUrl, token, userId, userName}) {
+export async function saveApiConfig(fields = {}) {
   const pairs = [];
-  if (baseUrl != null) {
-    pairs.push([KEYS.baseUrl, String(baseUrl).replace(/\/$/, '')]);
+  const put = (key, value) => {
+    if (value === undefined) return;
+    pairs.push([key, value == null ? '' : String(value)]);
+  };
+
+  if (fields.baseUrl != null) {
+    put(KEYS.baseUrl, String(fields.baseUrl).replace(/\/$/, ''));
   }
-  if (token != null) {
-    pairs.push([KEYS.token, String(token)]);
+  if (fields.token != null) put(KEYS.token, fields.token);
+  if (fields.userId != null) put(KEYS.userId, fields.userId);
+  if (fields.userName != null) put(KEYS.userName, fields.userName);
+  if (fields.caregiverName != null) put(KEYS.caregiverName, fields.caregiverName);
+  if (fields.caregiverPhone != null) {
+    put(KEYS.caregiverPhone, fields.caregiverPhone);
   }
-  if (userId != null) {
-    pairs.push([KEYS.userId, String(userId)]);
+  if (fields.signedIn != null) {
+    put(KEYS.signedIn, fields.signedIn ? '1' : '0');
   }
-  if (userName != null) {
-    pairs.push([KEYS.userName, String(userName)]);
-  }
+
   if (pairs.length) {
     await AsyncStorage.multiSet(pairs);
   }
 }
 
 export async function clearSessionUser() {
-  await AsyncStorage.multiRemove([KEYS.userId, KEYS.userName]);
+  await AsyncStorage.multiRemove([
+    KEYS.userId,
+    KEYS.userName,
+    KEYS.caregiverName,
+    KEYS.caregiverPhone,
+    KEYS.signedIn,
+  ]);
 }

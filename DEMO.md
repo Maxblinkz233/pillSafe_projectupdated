@@ -15,6 +15,7 @@ Use this checklist for a live demonstration. Time budget: ~10–15 minutes.
    - API URL: `http://192.168.4.1:5000` (hotspot) or `http://<pi-ip>:5000`
    - Token: value from `hardware/config.yaml` → `api.token`
    - Tap **Test Connection** → select the demo user → **Save**
+   - (Developers) Africa’s Talking key lives in `src/config/africasTalking.js` — not in the UI
 5. Optional dry-run seed (dev machine or Pi):
    ```bash
    cd hardware
