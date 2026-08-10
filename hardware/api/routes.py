@@ -640,4 +640,48 @@ def create_app(db: DatabaseManager,
             logger.exception("Dose-due test failed")
             return jsonify({"status": "error", "error": str(exc)}), 500
 
+    # ── Network / Device Connection (hotspot ↔ Wi-Fi) ────────
+
+    @app.route("/network/status", methods=["GET"])
+    @require_auth
+    def network_status():
+        try:
+            from hardware.network_manager import status as net_status
+            return jsonify({"status": "success", "data": net_status()}), 200
+        except Exception as exc:
+            logger.exception("network status failed")
+            return jsonify({"status": "error", "error": str(exc)}), 500
+
+    @app.route("/network/hotspot", methods=["POST"])
+    @require_auth
+    def network_enable_hotspot():
+        """Switch wlan0 to PillSafe-AP (phone should join that SSID)."""
+        try:
+            from hardware.network_manager import enable_hotspot
+            data = enable_hotspot()
+            return jsonify({"status": "success", "data": data}), 200
+        except Exception as exc:
+            logger.exception("enable hotspot failed")
+            return jsonify({"status": "error", "error": str(exc)}), 500
+
+    @app.route("/network/wifi", methods=["POST"])
+    @require_auth
+    def network_join_wifi():
+        """
+        Leave hotspot and join a known Wi-Fi.
+        Body: { "ssid": "HomeWifi", "password": "secret123" }
+        """
+        body = request.get_json(silent=True) or {}
+        ssid = body.get("ssid")
+        password = body.get("password")
+        try:
+            from hardware.network_manager import join_wifi
+            data = join_wifi(ssid, password)
+            return jsonify({"status": "success", "data": data}), 200
+        except ValueError as exc:
+            return jsonify({"status": "error", "error": str(exc)}), 400
+        except Exception as exc:
+            logger.exception("join wifi failed")
+            return jsonify({"status": "error", "error": str(exc)}), 500
+
     return app

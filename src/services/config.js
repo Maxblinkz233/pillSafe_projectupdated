@@ -8,10 +8,14 @@ const KEYS = {
   caregiverName: '@pillsafe/caregiver_name',
   caregiverPhone: '@pillsafe/caregiver_phone',
   signedIn: '@pillsafe/signed_in',
+  networkMode: '@pillsafe/network_mode',
 };
 
-export const DEFAULT_BASE_URL = 'http://10.0.2.2:5000';
-export const DEFAULT_TOKEN = 'CHANGE_ME_ON_FIRST_SETUP';
+/** Default while phone is on PillSafe-AP (NetworkManager shared hotspot). */
+export const HOTSPOT_BASE_URL = 'http://10.42.0.1:5000';
+export const HOTSPOT_SSID = 'PillSafe-AP';
+export const DEFAULT_BASE_URL = HOTSPOT_BASE_URL;
+export const DEFAULT_TOKEN = 'pillsafe';
 
 export function getApiBaseUrlCandidates(baseUrl = DEFAULT_BASE_URL) {
   const normalized = String(baseUrl || '').trim().replace(/\/$/, '');
@@ -27,8 +31,10 @@ export function getApiBaseUrlCandidates(baseUrl = DEFAULT_BASE_URL) {
   };
 
   addCandidate(normalized);
-  addCandidate('http://10.0.2.2:5000');
+  addCandidate(HOTSPOT_BASE_URL);
   addCandidate('http://192.168.4.1:5000');
+  addCandidate('http://172.20.10.4:5000');
+  addCandidate('http://10.0.2.2:5000');
   addCandidate('http://localhost:5000');
 
   return candidates;
@@ -43,6 +49,7 @@ export async function getApiConfig() {
     KEYS.caregiverName,
     KEYS.caregiverPhone,
     KEYS.signedIn,
+    KEYS.networkMode,
   ]);
   const map = Object.fromEntries(rows);
 
@@ -54,6 +61,7 @@ export async function getApiConfig() {
     caregiverName: map[KEYS.caregiverName] || null,
     caregiverPhone: map[KEYS.caregiverPhone] || null,
     signedIn: map[KEYS.signedIn] === '1',
+    networkMode: map[KEYS.networkMode] === 'wifi' ? 'wifi' : 'hotspot',
   };
 }
 
@@ -76,6 +84,9 @@ export async function saveApiConfig(fields = {}) {
   }
   if (fields.signedIn != null) {
     put(KEYS.signedIn, fields.signedIn ? '1' : '0');
+  }
+  if (fields.networkMode != null) {
+    put(KEYS.networkMode, fields.networkMode);
   }
 
   if (pairs.length) {

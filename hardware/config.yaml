@@ -135,14 +135,16 @@ system:
   log_level: "INFO"
 
 # --- Wi-Fi Access Point (Hotspot) ---
-# The Pi broadcasts its own network so the caregiver's phone
-# can connect directly without needing an external Wi-Fi router.
+# NetworkManager shared AP (preferred on Bookworm). App Device Connection
+# can switch between hotspot and client Wi-Fi via /network/* APIs.
 hotspot:
   enabled: true
   ssid: "PillSafe-AP"
   password: "pillsafe2026"          # WPA2 passphrase (min 8 chars)
+  # URL the phone should use while joined to PillSafe-AP (NM shared = 10.42.0.1)
+  api_url: "http://10.42.0.1:5000"
   channel: 6
-  ip_address: "192.168.4.1"
+  ip_address: "192.168.4.1"         # legacy hostapd script; NM uses 10.42.0.1
   subnet: "255.255.255.0"
   dhcp_range_start: "192.168.4.10"
   dhcp_range_end: "192.168.4.50"

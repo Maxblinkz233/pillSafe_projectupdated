@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   View,
   Text,
@@ -9,35 +9,43 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Switch,
 } from 'react-native';
-import { ChevronLeft, Wifi, CheckCircle, XCircle } from 'lucide-react-native';
+import {ChevronLeft, Wifi, CheckCircle, XCircle, Radio} from 'lucide-react-native';
 import {
-  DEFAULT_BASE_URL,
   DEFAULT_TOKEN,
+  HOTSPOT_BASE_URL,
+  HOTSPOT_SSID,
   getApiConfig,
   saveApiConfig,
 } from '../../services/config';
-import { api } from '../../services/api';
+import {api} from '../../services/api';
 
-const DeviceConnectionScreen = ({ navigation, route }) => {
+const DeviceConnectionScreen = ({navigation, route}) => {
   const authIntent = route?.params?.authIntent || null;
   const accountData = route?.params?.accountData || null;
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [token, setToken] = useState(DEFAULT_TOKEN);
   const [userId, setUserId] = useState('');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [health, setHealth] = useState(null);
   const [error, setError] = useState(null);
+  const [networkMode, setNetworkMode] = useState('hotspot'); // hotspot | wifi
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPassword, setWifiPassword] = useState('');
+  const [hubStatus, setHubStatus] = useState(null);
+  const [hubUrl, setHubUrl] = useState(HOTSPOT_BASE_URL);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const cfg = await getApiConfig();
-      setBaseUrl(cfg.baseUrl);
       setToken(cfg.token);
       setUserId(cfg.userId != null ? String(cfg.userId) : '');
+      setNetworkMode(cfg.networkMode === 'wifi' ? 'wifi' : 'hotspot');
+      setHubUrl(cfg.baseUrl || HOTSPOT_BASE_URL);
     } finally {
       setLoading(false);
     }
@@ -47,15 +55,26 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
     load();
   }, [load]);
 
+  const ensureConfigSaved = async (extra = {}) => {
+    const url =
+      extra.baseUrl ||
+      (networkMode === 'hotspot' ? HOTSPOT_BASE_URL : hubUrl) ||
+      HOTSPOT_BASE_URL;
+    await saveApiConfig({
+      baseUrl: url,
+      token: token.trim() || DEFAULT_TOKEN,
+      networkMode: extra.networkMode || networkMode,
+      ...extra,
+    });
+    setHubUrl(url);
+  };
+
   const onSave = async () => {
     try {
-      await saveApiConfig({
-        baseUrl: baseUrl.trim(),
-        token: token.trim(),
-      });
+      await ensureConfigSaved();
       if (authIntent && !health) {
         await api.health();
-        await api.getUsers(); // also validates the bearer token
+        await api.getUsers();
       }
 
       if (authIntent === 'signup') {
@@ -75,7 +94,7 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
           caregiverPhone: user.caregiver_phone,
           signedIn: true,
         });
-        navigation.reset({ index: 0, routes: [{ name: 'MainApp' }] });
+        navigation.reset({index: 0, routes: [{name: 'MainApp'}]});
         return;
       }
 
@@ -97,20 +116,24 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
     setError(null);
     setHealth(null);
     try {
-      await saveApiConfig({
-        baseUrl: baseUrl.trim(),
-        token: token.trim(),
+      await ensureConfigSaved({
+        baseUrl: networkMode === 'hotspot' ? HOTSPOT_BASE_URL : hubUrl,
       });
       const status = await api.health();
       setHealth(status);
+      try {
+        const net = await api.getNetworkStatus();
+        setHubStatus(net);
+        if (net?.recommended_api_url) {
+          setHubUrl(net.recommended_api_url);
+          await saveApiConfig({baseUrl: net.recommended_api_url});
+        }
+      } catch {
+        // older hubs without /network/status
+      }
       const list = await api.getUsers();
       setUsers(list || []);
-      if (
-        !authIntent &&
-        (!userId || userId === '') &&
-        list &&
-        list.length > 0
-      ) {
+      if (!authIntent && (!userId || userId === '') && list?.length > 0) {
         setUserId(String(list[0].user_id));
       }
     } catch (err) {
@@ -118,6 +141,74 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
       setUsers([]);
     } finally {
       setTesting(false);
+    }
+  };
+
+  const selectHotspotMode = async () => {
+    setNetworkMode('hotspot');
+    setError(null);
+    setApplying(true);
+    try {
+      await ensureConfigSaved({
+        networkMode: 'hotspot',
+        baseUrl: HOTSPOT_BASE_URL,
+      });
+      // Best-effort: ask hub to start AP (works if already reachable)
+      try {
+        const net = await api.enableHotspot();
+        setHubStatus(net);
+        const url = net?.recommended_api_url || HOTSPOT_BASE_URL;
+        setHubUrl(url);
+        await saveApiConfig({baseUrl: url, networkMode: 'hotspot'});
+      } catch {
+        // Hub may already be switching; user joins AP manually
+      }
+      Alert.alert(
+        'Hotspot mode',
+        `On your phone Wi‑Fi, join "${HOTSPOT_SSID}" (password from the hub sticker / setup), then tap Test Connection.\n\nHub address is set automatically.`,
+      );
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const selectWifiMode = () => {
+    setNetworkMode('wifi');
+    setError(null);
+  };
+
+  const onConnectWifi = async () => {
+    const ssid = wifiSsid.trim();
+    if (!ssid) {
+      Alert.alert('Wi‑Fi name required', 'Enter the Wi‑Fi network name (SSID).');
+      return;
+    }
+    if (wifiPassword.length < 8) {
+      Alert.alert('Password too short', 'Wi‑Fi password must be at least 8 characters.');
+      return;
+    }
+
+    setApplying(true);
+    setError(null);
+    try {
+      await ensureConfigSaved({networkMode: 'wifi'});
+      const net = await api.joinWifi({ssid, password: wifiPassword});
+      setHubStatus(net);
+      const nextUrl = net?.recommended_api_url || hubUrl;
+      if (nextUrl) {
+        setHubUrl(nextUrl);
+        await saveApiConfig({baseUrl: nextUrl, networkMode: 'wifi'});
+      }
+      Alert.alert(
+        'Switching to Wi‑Fi',
+        net?.message ||
+          `The hub is joining "${ssid}". On your phone, leave ${HOTSPOT_SSID} and join that same Wi‑Fi, then tap Test Connection.`,
+      );
+    } catch (err) {
+      setError(err.message || String(err));
+      Alert.alert('Could not join Wi‑Fi', String(err.message || err));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -136,47 +227,99 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
+          onPress={() => navigation.goBack()}>
           <ChevronLeft size={22} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Device Connection</Text>
-        <View style={{ width: 36 }} />
+        <View style={{width: 36}} />
       </View>
 
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Wifi size={22} color="#3B5BDB" />
-          <Text style={styles.cardTitle}>PillSafe Hub API</Text>
+          <Text style={styles.cardTitle}>Connect to PillSafe hub</Text>
         </View>
         <Text style={styles.hint}>
-          {authIntent
-            ? 'Connect to the hub (PC or Raspberry Pi). Your account details will be securely processed after the connection succeeds.'
-            : 'Connect to the Raspberry Pi hotspot (PillSafe-AP) or the same LAN, then set the API URL and Bearer token from config.yaml.'}
+          Start on the PillSafe hotspot, or switch the hub onto your home /
+          phone Wi‑Fi. You do not need to type an API address.
         </Text>
 
-        <Text style={styles.label}>API BASE URL</Text>
-        <TextInput
-          style={styles.input}
-          value={baseUrl}
-          onChangeText={setBaseUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="http://192.168.4.1:5000"
-          placeholderTextColor="#9CA3AF"
-        />
+        <View style={styles.modeRow}>
+          <View style={styles.modeInfo}>
+            <Radio size={18} color="#3B5BDB" />
+            <View style={{flex: 1}}>
+              <Text style={styles.modeTitle}>Hotspot (PillSafe-AP)</Text>
+              <Text style={styles.modeSub}>
+                First-time setup — join {HOTSPOT_SSID} on your phone
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={networkMode === 'hotspot'}
+            onValueChange={on => {
+              if (on) selectHotspotMode();
+            }}
+            trackColor={{false: '#E5E7EB', true: '#A5B4FC'}}
+            thumbColor={networkMode === 'hotspot' ? '#3B5BDB' : '#F9FAFB'}
+          />
+        </View>
 
-        <Text style={styles.label}>API TOKEN</Text>
-        <TextInput
-          style={styles.input}
-          value={token}
-          onChangeText={setToken}
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          placeholder="Bearer token"
-          placeholderTextColor="#9CA3AF"
-        />
+        <View style={styles.modeRow}>
+          <View style={styles.modeInfo}>
+            <Wifi size={18} color="#059669" />
+            <View style={{flex: 1}}>
+              <Text style={styles.modeTitle}>Wi‑Fi (home / phone hotspot)</Text>
+              <Text style={styles.modeSub}>
+                Hub joins a known network; phone uses the same Wi‑Fi
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={networkMode === 'wifi'}
+            onValueChange={on => {
+              if (on) selectWifiMode();
+              else selectHotspotMode();
+            }}
+            trackColor={{false: '#E5E7EB', true: '#6EE7B7'}}
+            thumbColor={networkMode === 'wifi' ? '#059669' : '#F9FAFB'}
+          />
+        </View>
+
+        {networkMode === 'wifi' && (
+          <View style={styles.wifiBox}>
+            <Text style={styles.label}>WI‑FI NAME (SSID)</Text>
+            <TextInput
+              style={styles.input}
+              value={wifiSsid}
+              onChangeText={setWifiSsid}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="e.g. Simeon’s iPhone"
+              placeholderTextColor="#9CA3AF"
+            />
+            <Text style={styles.label}>WI‑FI PASSWORD</Text>
+            <TextInput
+              style={styles.input}
+              value={wifiPassword}
+              onChangeText={setWifiPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+              placeholder="Network password"
+              placeholderTextColor="#9CA3AF"
+            />
+            <TouchableOpacity
+              style={styles.connectWifiButton}
+              onPress={onConnectWifi}
+              disabled={applying}>
+              {applying ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.testButtonText}>Connect hub to Wi‑Fi</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
 
         {!authIntent && (
           <>
@@ -202,21 +345,27 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
                   styles.userRow,
                   String(u.user_id) === String(userId) && styles.userRowActive,
                 ]}
-                onPress={() => setUserId(String(u.user_id))}
-              >
+                onPress={() => setUserId(String(u.user_id))}>
                 <Text
                   style={[
                     styles.userText,
                     String(u.user_id) === String(userId) &&
                       styles.userTextActive,
-                  ]}
-                >
+                  ]}>
                   #{u.user_id} — {u.full_name} (compartment{' '}
                   {u.compartment_index})
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
+        )}
+
+        {hubStatus && (
+          <Text style={styles.meta}>
+            Hub mode: {hubStatus.mode || '—'}
+            {hubStatus.ssid ? ` · ${hubStatus.ssid}` : ''}
+            {hubStatus.primary_ipv4 ? ` · ${hubStatus.primary_ipv4}` : ''}
+          </Text>
         )}
 
         {health && (
@@ -238,8 +387,7 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
         <TouchableOpacity
           style={styles.testButton}
           onPress={onTest}
-          disabled={testing}
-        >
+          disabled={testing || applying}>
           {testing ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
@@ -260,7 +408,7 @@ const DeviceConnectionScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      <View style={{ height: 40 }} />
+      <View style={{height: 40}} />
     </ScrollView>
   );
 };
@@ -319,6 +467,38 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 16,
   },
+  modeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+  },
+  modeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    paddingRight: 12,
+  },
+  modeTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  modeSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  wifiBox: {
+    marginTop: 8,
+    marginBottom: 8,
+    padding: 12,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+  },
   label: {
     fontSize: 11,
     color: '#6B7280',
@@ -360,6 +540,11 @@ const styles = StyleSheet.create({
     color: '#3B5BDB',
     fontWeight: '600',
   },
+  meta: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#6B7280',
+  },
   statusOk: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -387,6 +572,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#991B1B',
+  },
+  connectWifiButton: {
+    backgroundColor: '#059669',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 14,
   },
   testButton: {
     backgroundColor: '#3B5BDB',

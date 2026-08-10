@@ -1,6 +1,6 @@
 # PillSafe systemd service (NFR-12)
-# Install:
-#   sudo cp pillsafe.service /etc/systemd/system/
+# Install on Pi:
+#   sudo cp services/pillsafe.service /etc/systemd/system/pillsafe.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable pillsafe
 #   sudo systemctl start pillsafe
@@ -11,13 +11,13 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/pillsafe
-ExecStart=/usr/bin/python3 /home/pi/pillsafe/main.py
+User=boison08
+WorkingDirectory=/home/boison08/Documents/pillSafe_projectupdated/hardware
+ExecStart=/usr/bin/python3 /home/boison08/Documents/pillSafe_projectupdated/hardware/main.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/home/pi/pillsafe/data/pillsafe_stdout.log
-StandardError=append:/home/pi/pillsafe/data/pillsafe_stderr.log
+StandardOutput=append:/home/boison08/Documents/pillSafe_projectupdated/hardware/data/pillsafe_stdout.log
+StandardError=append:/home/boison08/Documents/pillSafe_projectupdated/hardware/data/pillsafe_stderr.log
 
 [Install]
 WantedBy=multi-user.target

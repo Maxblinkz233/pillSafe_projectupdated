@@ -80,6 +80,17 @@ async function request(path, { method = 'GET', body, query, signal } = {}) {
 export const api = {
   health: () => request('/health'),
 
+  getNetworkStatus: () => request('/network/status'),
+
+  enableHotspot: () =>
+    request('/network/hotspot', {method: 'POST'}),
+
+  joinWifi: ({ssid, password}) =>
+    request('/network/wifi', {
+      method: 'POST',
+      body: {ssid, password},
+    }),
+
   stopCameraPreview: () =>
     request('/camera/preview/stop', {method: 'POST'}),
 

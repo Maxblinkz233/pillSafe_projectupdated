@@ -295,6 +295,27 @@ journalctl -u pillsafe -f           # live logs
 > If your username isn't `pi`, edit `User=` and the paths in
 > `/etc/systemd/system/pillsafe.service`, then `daemon-reload` and restart.
 
+## Network modes (hotspot ↔ Wi‑Fi from the app)
+
+The Device Connection screen can switch the Pi between **PillSafe-AP** and a
+known Wi‑Fi network (no API URL field for end users).
+
+Hub APIs (Bearer auth):
+
+- `GET /network/status`
+- `POST /network/hotspot`
+- `POST /network/wifi` body `{ "ssid", "password" }`
+
+On the Pi, allow the service user to run `nmcli` without a password:
+
+```bash
+sudo bash /home/boison08/Documents/pillSafe_projectupdated/hardware/scripts/install_nmcli_sudoers.sh
+sudo systemctl restart pillsafe
+```
+
+While on PillSafe-AP the phone uses `http://10.42.0.1:5000` automatically.
+After joining home Wi‑Fi, join that same network on the phone and tap **Test Connection**.
+
 ## SMS path (Africa’s Talking primary → GSM → phone fallback)
 
 1. Hub calls **Africa’s Talking** REST over HTTPS (credentials in `config.yaml` → `alerts.africas_talking`). Use a **live** username + API key and `sandbox: false` for real caregiver handsets. Sandbox only shows messages in the [AT Simulator](https://simulator.africastalking.com:1517/).
