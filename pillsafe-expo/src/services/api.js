@@ -278,6 +278,8 @@ export function formatRelativeTime(iso) {
 
 export function notificationTypeLabel(type) {
   switch (type) {
+    case 'PENDING_PHONE_SMS':
+      return 'SMS FALLBACK';
     case 'MISSED':
       return 'MISSED DOSE';
     case 'DISPENSED':

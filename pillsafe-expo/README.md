@@ -21,6 +21,14 @@ Expo Go is still awaiting Apple App Store approval.
 5. In PillSafe, open **Settings → Device Connection** and configure the Pi URL
    and API token.
 
+## SMS fallback (GSM fail → Africa’s Talking)
+
+Same as the bare RN app: if the hub cannot send SMS via SIM800L, it queues
+`PENDING_PHONE_SMS` and the Expo app poller sends via Africa’s Talking using
+credentials in [`src/config/africasTalking.js`](src/config/africasTalking.js)
+(developers only — not shown in the UI). The phone needs internet (e.g. mobile
+data) for that API call while still reaching the hub for polling.
+
 During face enrolment and face verification, the app displays the live
 Raspberry Pi camera preview. The preview requires the updated Pi backend in this
 repository to be running.

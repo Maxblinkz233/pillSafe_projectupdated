@@ -74,7 +74,6 @@ export async function sendAfricasTalkingSms({
         error: `Africa’s Talking HTTP ${res.status}: ${text.slice(0, 200)}`,
       };
     }
-    // Recipients status: Success / Sent is good enough for demo
     const recipients = raw?.SMSMessageData?.Recipients;
     if (Array.isArray(recipients) && recipients.length) {
       const status = String(recipients[0].status || '');
