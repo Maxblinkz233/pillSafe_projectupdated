@@ -115,8 +115,11 @@ class Dispenser:
         for compartment, pin in enumerate(self.pins):
             try:
                 pwm = gpio.PWM(pin, self.frequency)
+                # Arm briefly at neutral, then idle at 0% so continuous-rotation
+                # MG996Rs do not creep when neutral_duty is slightly off.
                 pwm.start(self.neutral_duty)
                 time.sleep(self.settle_time)
+                pwm.ChangeDutyCycle(0)
                 self._pwms[compartment] = pwm
             except Exception as exc:
                 raise RuntimeError(
@@ -124,8 +127,8 @@ class Dispenser:
                     f"{exc}"
                 ) from exc
         logger.info(
-            "MG996R servos on GPIO %s at %d Hz [%s] (started at neutral %.1f%%)",
-            self.pins, self.frequency, gpio.BACKEND, self.neutral_duty,
+            "MG996R servos on GPIO %s at %d Hz [%s] (idle PWM 0%% after neutral arm)",
+            self.pins, self.frequency, gpio.BACKEND,
         )
 
     def compartment_to_servo_degrees(self, compartment_degrees: float) -> float:
