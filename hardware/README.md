@@ -295,20 +295,33 @@ journalctl -u pillsafe -f           # live logs
 > If your username isn't `pi`, edit `User=` and the paths in
 > `/etc/systemd/system/pillsafe.service`, then `daemon-reload` and restart.
 
-## SMS path (GSM primary + phone Africa’s Talking fallback)
+## SMS path (Africa’s Talking primary → GSM → phone fallback)
 
-1. Hub tries **SIM800L/C** over `/dev/serial0` for caregiver SMS.
-2. If GSM fails (module down, no signal, AT error), the hub inserts a notification of type **`PENDING_PHONE_SMS`** with JSON `{ "to", "body", "reason" }`.
-3. The React Native app poller (while connected to the hub) detects that notification and calls **Africa’s Talking** from the **phone** (needs mobile data / internet). Credentials are **baked into** [`src/config/africasTalking.js`](../src/config/africasTalking.js) by the developer — end users never enter them.
-4. After a successful AT send, the app marks the notification read.
+1. Hub calls **Africa’s Talking** REST over HTTPS (credentials in `config.yaml` → `alerts.africas_talking`). Use a **live** username + API key and `sandbox: false` for real caregiver handsets. Sandbox only shows messages in the [AT Simulator](https://simulator.africastalking.com:1517/).
+2. If AT fails (missing key, HTTP error, rejected number), hub tries **SIM800L/C** over `/dev/serial0`.
+3. If both fail, the hub inserts **`PENDING_PHONE_SMS`** with JSON `{ "to", "body", "reason" }`.
+4. The React Native app poller (while connected) sends via phone Africa’s Talking ([`src/config/africasTalking.js`](../src/config/africasTalking.js)) and marks the notification read.
 
-End users only know: dose events notify the caregiver by SMS. They set the caregiver phone on the patient profile; they do not configure Africa’s Talking.
+End users only set the caregiver phone (`+233…`). Developers put AT keys in hub `config.yaml` (and optionally the phone config for the last-resort path).
+
+### Deploy SMS after code pull
+
+```bash
+# On the Pi — edit live credentials in config.yaml first:
+#   alerts.africas_talking.username / api_key, sandbox: false
+sudo systemctl restart pillsafe
+journalctl -u pillsafe -f
+# Expect: "Alert service started (primary=africas_talking, at_configured=True, ...)"
+# On a dose event: "Africa's Talking SMS to +233…: Success" (before any pillsafe.gsm line)
+```
+
+Pi must have outbound internet (phone hotspot with mobile data, or LAN).
 
 ### Step 15 — Connect the mobile app
 1. Connect the phone to the Pi's Wi-Fi (`PillSafe-AP`) or the same LAN.
 2. Open the **React Native** PillSafe app → **Settings → Device Connection**.
 3. Set the API base URL (`http://192.168.4.1:5000` for the hotspot) and the Bearer token from Step 9.
-4. Optionally set Africa’s Talking credentials in `src/config/africasTalking.js` before building (developers only — not shown in the app UI).
+4. Hub SMS uses `hardware/config.yaml` Africa’s Talking keys; optional phone fallback keys live in `src/config/africasTalking.js` (developers only — not shown in the app UI).
 5. Tap **Test Connection**, select the patient user, then **Save**.
 6. Create users/schedules (API or enrolment CLI), then use **Verify → Verify Now** at dose time.
 
@@ -327,7 +340,8 @@ python3 scripts/dry_run_demo.py --base-url http://192.168.4.1:5000 --token YOUR_
 | RTC not found | `i2cdetect -y 1` shows nothing at 0x68 → re-check SDA/SCL/power; is I2C enabled? |
 | "TFLite model not loaded" | Run Step 7; confirm `data/models/mobilefacenet.tflite` exists |
 | Camera errors | `libcamera-hello`; ensure the CSI ribbon is seated and Camera is enabled |
-| No SMS sent | `ls -l /dev/serial0` matches `alerts.serial_port`; SIM800C LiPo + shared GND + 3.3V UART. If GSM fails, hub queues `PENDING_PHONE_SMS` — ensure `src/config/africasTalking.js` has a real API key and the phone has mobile data |
+| No SMS on phone | Set **live** `alerts.africas_talking` (`sandbox: false`); Pi needs HTTPS; caregiver is `+233…`. Sandbox → Simulator only. If AT+GSM fail, hub queues `PENDING_PHONE_SMS` — phone needs data + `src/config/africasTalking.js` |
+| GSM-only / no AT | `at_configured=False` in startup log → replace `REPLACE_WITH_*` placeholders; check `journalctl` for Africa's Talking HTTP errors |
 | Servos jitter / brown-out | External 5V ≥5–6 A for MG996R; share GND; raise `servo.hold_time` if needed |
 | Voice disabled at start | Expected while `voice.enabled: false`; else install sounddevice/librosa + INMP441 |
 | Service won't start | `journalctl -u pillsafe -e`; verify `User=`/paths in the unit file |

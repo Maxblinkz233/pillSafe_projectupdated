@@ -82,8 +82,8 @@ class GSMModule:
         if not SERIAL_AVAILABLE:
             logger.info("[SIM] SMS simulated (no pyserial) to %s", phone_number)
             return True
-        # Pi / real deploy: no open port or module silent → fail so the app
-        # can fall back to Africa's Talking from the phone.
+        # Pi / real deploy: no open port or module silent → fail so AlertService
+        # can try other channels (Africa's Talking / phone PENDING_PHONE_SMS).
         if self._serial is None or not self._initialised:
             logger.warning(
                 "GSM unavailable (port=%s, initialised=%s) — SMS not sent",

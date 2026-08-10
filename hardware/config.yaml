@@ -91,16 +91,24 @@ buzzer:
   failure_pattern: [0.1, 0.1, 0.1, 0.1, 0.1]
   missed_pattern: [1.0, 0.5, 1.0]
 
-# --- GSM / SMS Alerts (SIM800C on Pi UART) ---
-# Enable serial in raspi-config (Serial Port ON, Serial Console OFF).
+# --- SMS Alerts (Africa's Talking primary, GSM secondary) ---
+# Pi needs outbound HTTPS for Africa's Talking (hotspot with mobile data / LAN).
+# Enable serial in raspi-config (Serial Port ON, Serial Console OFF) for GSM.
 # Wiring (3.3V TTL): SIM800C TX→GPIO15(RX), RX→GPIO14(TX), GND shared.
 # Power SIM800C from a separate 3.7–4.2V LiPo — not from the Pi 5V rail alone.
 alerts:
   serial_port: "/dev/serial0"
   baud_rate: 9600
-  # Hub GSM (SIM800L/C) is primary. If GSM send fails, the hub queues a
-  # PENDING_PHONE_SMS notification; the React Native app sends the same text
-  # via Africa's Talking using the phone's internet (see Device Connection).
+  # Order: Africa's Talking (hub) → GSM → PENDING_PHONE_SMS (app AT last resort).
+  sms_primary: africas_talking
+  africas_talking:
+    # Live app username (NOT "sandbox") + live API key for real handset SMS.
+    # Sandbox only appears in https://simulator.africastalking.com:1517/
+    username: "pillsafe"
+    api_key: "atsk_33a67e211290ef1b83ab830883dba7d38657fd517c882c9c403d9476687912ed6db6b03d"
+    sender_id: ""                   # optional approved alphanumeric / shortcode
+    sandbox: false                  # true = Simulator only; false = real SMS
+    timeout_seconds: 15
   max_sms_per_event: 2              # max texts per event key
   retry_interval_minutes: 60        # wait before a 2nd SMS (MISSED/REJECTED)
   sms_timeout: 10

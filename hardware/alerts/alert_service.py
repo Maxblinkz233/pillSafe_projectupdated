@@ -1,11 +1,12 @@
 """
 PillSafe — SMS Alert Service
 Monitors the database for missed/rejected events and dispatches
-SMS alerts via the GSM module (FR-38 to FR-43).
+SMS alerts (FR-38 to FR-43).
 
-Primary path: hub SIM800L/C (GSM).
-Fallback: if GSM fails, queue PENDING_PHONE_SMS so the React Native app
-can send the same text via Africa's Talking from the user's phone.
+Primary: hub Africa's Talking REST (live credentials in config.yaml).
+Secondary: hub SIM800L/C (GSM).
+Tertiary: queue PENDING_PHONE_SMS so the React Native app can send via
+Africa's Talking from the phone (last resort).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import time
 import threading
 from datetime import datetime, timedelta
 
+from alerts.africas_talking import AfricasTalkingSMS
 from database.db_manager import DatabaseManager
 from hardware.gsm import GSMModule
 from utils.config import get_config
@@ -31,11 +33,16 @@ class AlertService:
     def __init__(self, db: DatabaseManager, gsm: GSMModule):
         self.db = db
         self.gsm = gsm
+        self.at = AfricasTalkingSMS()
         cfg = get_config()
         self.max_sms = int(getattr(cfg.alerts, "max_sms_per_event", 2) or 2)
         self.retry_interval = int(
             getattr(cfg.alerts, "retry_interval_minutes", 60) or 60
         )
+        primary = str(
+            getattr(cfg.alerts, "sms_primary", "africas_talking") or "africas_talking"
+        ).strip().lower()
+        self.sms_primary = primary
         self._running = False
         self._thread = None
         # Per-event SMS accounting (FR-40 / FR-41). Keys are stable strings.
@@ -51,8 +58,11 @@ class AlertService:
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
         logger.info(
-            "Alert service started (max_sms=%d, retry=%d min)",
-            self.max_sms, self.retry_interval,
+            "Alert service started (primary=%s, at_configured=%s, max_sms=%d, retry=%d min)",
+            self.sms_primary,
+            self.at.is_configured(),
+            self.max_sms,
+            self.retry_interval,
         )
 
     def stop(self) -> None:
@@ -117,7 +127,11 @@ class AlertService:
                 self._first_sms_times[key] = datetime.now()
 
     def _queue_phone_sms(
-        self, user_id: int | None, phone: str, body: str, reason: str = "gsm_failed",
+        self,
+        user_id: int | None,
+        phone: str,
+        body: str,
+        reason: str = "at_and_gsm_failed",
     ) -> int | None:
         """Ask the mobile app to send this SMS via Africa's Talking."""
         payload = json.dumps({
@@ -128,13 +142,27 @@ class AlertService:
         try:
             nid = self.db.add_notification(PENDING_PHONE_SMS, payload, user_id=user_id)
             logger.warning(
-                "GSM failed — queued %s id=%s for phone Africa's Talking fallback",
-                PENDING_PHONE_SMS, nid,
+                "Hub SMS failed (%s) — queued %s id=%s for phone Africa's Talking",
+                reason, PENDING_PHONE_SMS, nid,
             )
             return nid
         except Exception as e:
             logger.error("Failed to queue %s: %s", PENDING_PHONE_SMS, e)
             return None
+
+    def _try_africas_talking(self, phone: str, body: str) -> bool:
+        try:
+            return bool(self.at.send_sms(phone, body))
+        except Exception as e:
+            logger.error("Africa's Talking send_sms raised: %s", e)
+            return False
+
+    def _try_gsm(self, phone: str, body: str) -> bool:
+        try:
+            return bool(self.gsm.send_sms(phone, body))
+        except Exception as e:
+            logger.error("GSM send_sms raised: %s", e)
+            return False
 
     def _deliver_sms(
         self,
@@ -144,18 +172,25 @@ class AlertService:
         user_id: int | None = None,
     ) -> bool:
         """
-        Try hub GSM first. On failure, queue PENDING_PHONE_SMS for the app.
-        Returns True if GSM succeeded OR the phone-fallback was queued.
+        Africa's Talking (hub) → GSM → PENDING_PHONE_SMS (app).
+        Returns True if any path succeeded or the phone fallback was queued.
         """
-        ok = False
-        try:
-            ok = bool(self.gsm.send_sms(phone, body))
-        except Exception as e:
-            logger.error("GSM send_sms raised: %s", e)
-            ok = False
-        if ok:
-            return True
-        queued = self._queue_phone_sms(user_id, phone, body)
+        if self.sms_primary in ("gsm", "sim800", "sim800c"):
+            order = ("gsm", "africas_talking")
+        else:
+            order = ("africas_talking", "gsm")
+
+        for channel in order:
+            if channel == "africas_talking":
+                if self._try_africas_talking(phone, body):
+                    return True
+            else:
+                if self._try_gsm(phone, body):
+                    return True
+
+        queued = self._queue_phone_sms(
+            user_id, phone, body, reason="at_and_gsm_failed",
+        )
         return queued is not None
 
     # ── Background monitor (MISSED / REJECTED retries) ───────

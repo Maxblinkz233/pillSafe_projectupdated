@@ -15,7 +15,7 @@ Use this checklist for a live demonstration. Time budget: ~10–15 minutes.
    - API URL: `http://192.168.4.1:5000` (hotspot) or `http://<pi-ip>:5000`
    - Token: value from `hardware/config.yaml` → `api.token`
    - Tap **Test Connection** → select the demo user → **Save**
-   - (Developers) Africa’s Talking key lives in `src/config/africasTalking.js` — not in the UI
+   - (Developers) Hub SMS: live Africa’s Talking keys in `hardware/config.yaml` → `alerts.africas_talking`. Phone last-resort key: `src/config/africasTalking.js` (not in the UI)
 5. Optional dry-run seed (dev machine or Pi):
    ```bash
    cd hardware
@@ -40,7 +40,7 @@ Use this checklist for a live demonstration. Time budget: ~10–15 minutes.
 |------|--------|----------|
 | 1 | Trigger a schedule; do **not** press Verify Now | Grace period (default 15 min — shorten in `config.yaml` for demos) |
 | 2 | Let grace expire | Adherence MISSED, MISSED notification |
-| 3 | Caregiver phone | SMS from SIM800L (if GSM configured) |
+| 3 | Caregiver phone | SMS via Africa’s Talking first, then SIM800L if AT fails |
 | 4 | Show **Alerts** filter **Missed** | Unread MISSED card |
 
 **Shortcut for UI-only proof** (no waiting):
@@ -71,7 +71,7 @@ Then refresh Home / Alerts on the phone.
 | App offline / connection error | Device Connection URL/token; same Wi-Fi; `curl http://PI:5000/health` |
 | 401 Invalid token | Match `api.token` / `PILLSAFE_API_TOKEN` |
 | Verify accepted but no dispense | Check Pi logs: face reject, IR timeout, servo power |
-| No SMS | SIM800L power (3.7 V LiPo), shared GND, `alerts.serial_port` |
+| No SMS | Live AT keys in `config.yaml` (`sandbox: false`), Pi HTTPS; else SIM800L LiPo + `alerts.serial_port`; else `PENDING_PHONE_SMS` + phone data |
 
 ## Backup (if hardware fails on the day)
 

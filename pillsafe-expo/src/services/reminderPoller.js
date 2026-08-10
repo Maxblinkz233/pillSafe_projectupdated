@@ -98,7 +98,7 @@ async function processPendingPhoneSms(notifications) {
 
 /**
  * Poll hub notifications for REMINDER events and PENDING_PHONE_SMS
- * (GSM fail → Africa’s Talking from this phone).
+ * (hub AT+GSM failed → Africa’s Talking from this phone).
  */
 export function startReminderPoller({onReminder, navigationRef} = {}) {
   let stopped = false;
