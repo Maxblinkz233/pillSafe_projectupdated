@@ -1,0 +1,27 @@
+# PillSafe Expo Metro bundler — auto-start on Pi boot
+# Install on Pi:
+#   sudo cp services/pillsafe-expo.service /etc/systemd/system/pillsafe-expo.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable pillsafe-expo
+#   sudo systemctl start pillsafe-expo
+#
+# Or: bash scripts/install_pillsafe_expo_service.sh
+
+[Unit]
+Description=PillSafe Expo Metro (mobile app dev server)
+After=network-online.target pillsafe.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=boison08
+WorkingDirectory=/home/boison08/Documents/pillSafe_projectupdated/pillsafe-expo
+ExecStart=/bin/bash /home/boison08/Documents/pillSafe_projectupdated/hardware/scripts/start_pillsafe_expo.sh
+Restart=always
+RestartSec=15
+Environment=HOME=/home/boison08
+StandardOutput=append:/home/boison08/Documents/pillSafe_projectupdated/hardware/data/pillsafe_expo_stdout.log
+StandardError=append:/home/boison08/Documents/pillSafe_projectupdated/hardware/data/pillsafe_expo_stderr.log
+
+[Install]
+WantedBy=multi-user.target

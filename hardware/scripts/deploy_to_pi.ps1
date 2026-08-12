@@ -1,13 +1,17 @@
 # Deploy PillSafe hardware/ to the Pi without overwriting live config.yaml.
 # Usage (PowerShell, from repo root):
 #   .\hardware\scripts\deploy_to_pi.ps1 -PiHost 172.20.10.4
+#   .\hardware\scripts\deploy_to_pi.ps1 -PiHost 172.20.10.4 -IncludeExpo -InstallExpoService
 # Optional: -PiUser boison08
 
 param(
     [Parameter(Mandatory = $true)]
     [string]$PiHost,
     [string]$PiUser = "boison08",
-    [string]$RemoteHub = "/home/boison08/Documents/pillSafe_projectupdated/hardware"
+    [string]$RemoteHub = "/home/boison08/Documents/pillSafe_projectupdated/hardware",
+    [string]$RemoteExpo = "/home/boison08/Documents/pillSafe_projectupdated/pillsafe-expo",
+    [switch]$IncludeExpo,
+    [switch]$InstallExpoService
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +50,28 @@ try {
 
     Write-Host "Running remote install script..."
     ssh "${PiUser}@${PiHost}" "chmod +x $RemoteHub/scripts/install_pillsafe_service.sh && bash $RemoteHub/scripts/install_pillsafe_service.sh"
+
+    if ($IncludeExpo) {
+        $LocalExpo = Join-Path $RepoRoot "pillsafe-expo"
+        if (-not (Test-Path $LocalExpo)) {
+            throw "pillsafe-expo folder not found at $LocalExpo"
+        }
+        $expoStaging = Join-Path $env:TEMP ("pillsafe_expo_deploy_" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $expoStaging | Out-Null
+        try {
+            robocopy $LocalExpo $expoStaging /E /XD node_modules .git dist-ios-check /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+            Write-Host "Uploading pillsafe-expo (node_modules excluded)..."
+            ssh "${PiUser}@${PiHost}" "mkdir -p $RemoteExpo"
+            scp -r "$expoStaging\*" "${PiUser}@${PiHost}:${RemoteExpo}/"
+            if ($InstallExpoService) {
+                Write-Host "Installing pillsafe-expo systemd service..."
+                ssh "${PiUser}@${PiHost}" "chmod +x $RemoteHub/scripts/install_pillsafe_expo_service.sh $RemoteHub/scripts/start_pillsafe_expo.sh && bash $RemoteHub/scripts/install_pillsafe_expo_service.sh"
+            }
+        }
+        finally {
+            Remove-Item -Recurse -Force $expoStaging -ErrorAction SilentlyContinue
+        }
+    }
 }
 finally {
     Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue

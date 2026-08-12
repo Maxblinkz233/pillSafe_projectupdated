@@ -295,6 +295,31 @@ journalctl -u pillsafe -f           # live logs
 > If your username isn't `pi`, edit `User=` and the paths in
 > `/etc/systemd/system/pillsafe.service`, then `daemon-reload` and restart.
 
+### Step 15 — Auto-start Expo Metro on boot (optional)
+
+If the Pi also hosts the Expo dev server (phone loads the app from the Pi via
+Expo Go), install Node **18+** once, copy `pillsafe-expo/` to the Pi, then:
+
+```bash
+# One-time: Node 18+ on Bookworm (example — pick your preferred method)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Sync pillsafe-expo to /home/boison08/Documents/pillSafe_projectupdated/pillsafe-expo
+cd /home/boison08/Documents/pillSafe_projectupdated/hardware
+bash scripts/install_pillsafe_expo_service.sh
+```
+
+After reboot both services should be up:
+
+```bash
+systemctl is-active pillsafe pillsafe-expo
+tail -n 30 data/pillsafe_expo_stdout.log   # QR / exp:// URL appears here
+```
+
+On the phone: connect to **PillSafe-AP** (or the same Wi‑Fi), open **Expo Go**,
+and enter `exp://10.42.0.1:8081` (hotspot) or `exp://<pi-lan-ip>:8081`.
+
 ## Network modes (hotspot ↔ Wi‑Fi from the app)
 
 The Device Connection screen can switch the Pi between **PillSafe-AP** and a

@@ -39,6 +39,33 @@ reachable on the same network. If LAN discovery fails, run `npm start -- --tunne
 the iPhone and PC then need internet access, while the iPhone must still be able
 to reach the Pi API.
 
+## Auto-start Metro on the Raspberry Pi
+
+You can run Expo on the Pi itself so it starts on every boot (no PC needed):
+
+1. Install **Node.js 18+** on the Pi.
+2. Copy this `pillsafe-expo/` folder to
+   `/home/boison08/Documents/pillSafe_projectupdated/pillsafe-expo`.
+3. On the Pi:
+
+   ```sh
+   cd /home/boison08/Documents/pillSafe_projectupdated/hardware
+   bash scripts/install_pillsafe_expo_service.sh
+   ```
+
+4. Reboot and check:
+
+   ```sh
+   systemctl is-active pillsafe-expo
+   tail -n 30 /home/boison08/Documents/pillSafe_projectupdated/hardware/data/pillsafe_expo_stdout.log
+   ```
+
+5. On the phone (Expo Go): connect to PillSafe-AP or the same Wi‑Fi, then open
+   `exp://10.42.0.1:8081` (hotspot) or `exp://<pi-ip>:8081`.
+
+The hub (`pillsafe.service`) and Metro (`pillsafe-expo.service`) are separate
+units — enable both for a fully self-contained Pi demo.
+
 ## Compatibility note
 
 `react-native-vision-camera` was not copied because the app does not import or
