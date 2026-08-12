@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useState} from 'react';
 import {
   View,
   Text,
@@ -6,21 +6,27 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  ScrollView,
   Alert,
 } from 'react-native';
-import { User, Phone, Lock } from 'lucide-react-native';
+import {User, Lock} from 'lucide-react-native';
+import KeyboardScreen from '../../components/KeyboardScreen';
+import CaregiverPhoneInput from '../../components/CaregiverPhoneInput';
+import {
+  DEFAULT_PHONE_COUNTRY,
+  validateCaregiverPhone,
+} from '../../utils/phoneCountries';
 
-const SignUpScreen = ({ navigation }) => {
+const SignUpScreen = ({navigation}) => {
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [caregiverName, setCaregiverName] = useState('');
-  const [caregiverPhone, setCaregiverPhone] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState(DEFAULT_PHONE_COUNTRY);
+  const [phoneNational, setPhoneNational] = useState('');
+  const [phoneError, setPhoneError] = useState('');
 
   const handleSignUp = () => {
     const name = fullName.trim();
-    const phone = caregiverPhone.trim();
     if (!name) {
       Alert.alert('Missing name', 'Enter the patient’s full name.');
       return;
@@ -40,26 +46,26 @@ const SignUpScreen = ({ navigation }) => {
       Alert.alert('Missing caregiver name', 'Enter the caregiver’s full name.');
       return;
     }
-    if (!phone) {
-      Alert.alert(
-        'Missing phone',
-        'Enter a caregiver phone number for SMS alerts (e.g. +233…).',
-      );
+    const phoneCheck = validateCaregiverPhone(phoneCountry, phoneNational);
+    if (!phoneCheck.ok) {
+      setPhoneError(phoneCheck.error);
+      Alert.alert('Invalid phone number', phoneCheck.error);
       return;
     }
+    setPhoneError('');
     navigation.navigate('DeviceConnection', {
       authIntent: 'signup',
       accountData: {
         fullName: name,
         password,
         caregiverName: caregiverName.trim(),
-        caregiverPhone: phone,
+        caregiverPhone: phoneCheck.e164,
       },
     });
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <KeyboardScreen contentContainerStyle={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#EEF0FB" />
 
       <View style={styles.logoContainer}>
@@ -126,17 +132,17 @@ const SignUpScreen = ({ navigation }) => {
         </View>
 
         <Text style={styles.label}>Caregiver Phone</Text>
-        <View style={styles.inputContainer}>
-          <Phone size={18} color="#9CA3AF" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="+233…"
-            placeholderTextColor="#9CA3AF"
-            value={caregiverPhone}
-            onChangeText={setCaregiverPhone}
-            keyboardType="phone-pad"
-          />
-        </View>
+        <CaregiverPhoneInput
+          country={phoneCountry}
+          national={phoneNational}
+          onChangeCountry={setPhoneCountry}
+          onChangeNational={text => {
+            setPhoneNational(text);
+            setPhoneError('');
+          }}
+          error={phoneError}
+          placeholder="e.g. 598833244"
+        />
 
         <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
           <Text style={styles.signUpButtonText}>CONTINUE</Text>
@@ -144,14 +150,13 @@ const SignUpScreen = ({ navigation }) => {
 
         <TouchableOpacity
           style={styles.loginLink}
-          onPress={() => navigation.navigate('Login')}
-        >
+          onPress={() => navigation.navigate('Login')}>
           <Text style={styles.loginLinkText}>
             Already registered? <Text style={styles.loginLinkBold}>Login</Text>
           </Text>
         </TouchableOpacity>
       </View>
-    </ScrollView>
+    </KeyboardScreen>
   );
 };
 
@@ -163,7 +168,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     justifyContent: 'center',
   },
-  logoContainer: { alignItems: 'center', marginBottom: 28, marginTop: 40 },
+  logoContainer: {alignItems: 'center', marginBottom: 28, marginTop: 40},
   logoBadge: {
     flexDirection: 'row',
     backgroundColor: '#3B5BDB',
@@ -172,8 +177,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     marginBottom: 20,
   },
-  logoTextPill: { fontSize: 16, fontWeight: 'bold', color: '#FFFFFF' },
-  logoTextSafe: { fontSize: 16, fontWeight: 'bold', color: '#A5F3FC' },
+  logoTextPill: {fontSize: 16, fontWeight: 'bold', color: '#FFFFFF'},
+  logoTextSafe: {fontSize: 16, fontWeight: 'bold', color: '#A5F3FC'},
   title: {
     fontSize: 26,
     fontWeight: 'bold',
@@ -193,7 +198,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.06,
     shadowRadius: 12,
     elevation: 3,
@@ -215,8 +220,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 4,
   },
-  inputIcon: { marginRight: 10 },
-  input: { flex: 1, paddingVertical: 14, fontSize: 15, color: '#111827' },
+  inputIcon: {marginRight: 10},
+  input: {flex: 1, paddingVertical: 14, fontSize: 15, color: '#111827'},
   signUpButton: {
     backgroundColor: '#3B5BDB',
     borderRadius: 12,
@@ -230,9 +235,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 1,
   },
-  loginLink: { alignItems: 'center', marginTop: 18 },
-  loginLinkText: { fontSize: 13, color: '#6B7280' },
-  loginLinkBold: { color: '#3B5BDB', fontWeight: '700' },
+  loginLink: {alignItems: 'center', marginTop: 18},
+  loginLinkText: {fontSize: 13, color: '#6B7280'},
+  loginLinkBold: {color: '#3B5BDB', fontWeight: '700'},
 });
 
 export default SignUpScreen;

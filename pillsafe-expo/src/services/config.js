@@ -103,3 +103,9 @@ export async function clearSessionUser() {
     KEYS.signedIn,
   ]);
 }
+
+/** Clear the signed-in patient session (keeps hub URL / token for reconnect). */
+export async function signOutLocal() {
+  await clearSessionUser();
+  await saveApiConfig({signedIn: false});
+}
