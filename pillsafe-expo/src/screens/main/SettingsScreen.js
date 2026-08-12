@@ -24,7 +24,7 @@ import {
   Trash2,
   Mic,
 } from 'lucide-react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import { getApiConfig, signOutLocal } from '../../services/config';
 import { api, initials } from '../../services/api';
 
@@ -32,6 +32,7 @@ const SettingsScreen = ({ navigation }) => {
   const [userName, setUserName] = useState('Patient');
   const [faceEnrolled, setFaceEnrolled] = useState(true);
   const [voiceEnrolled, setVoiceEnrolled] = useState(true);
+
 
   useFocusEffect(
     useCallback(() => {
@@ -58,8 +59,17 @@ const SettingsScreen = ({ navigation }) => {
   );
 
   const handleLogout = async () => {
-    await signOutLocal();
-    navigation.replace('Login');
+    try {
+      await signOutLocal();
+    } finally {
+      // Settings sits inside MainTabs — reset the root stack back to Login.
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{name: 'Login'}],
+        }),
+      );
+    }
   };
 
   const SettingsItem = ({ icon, label, onPress }) => (

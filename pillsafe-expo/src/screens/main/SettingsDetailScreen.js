@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
@@ -28,6 +27,13 @@ import {
 } from 'lucide-react-native';
 import { api } from '../../services/api';
 import { getApiConfig, saveApiConfig } from '../../services/config';
+import KeyboardScreen from '../../components/KeyboardScreen';
+import CaregiverPhoneInput from '../../components/CaregiverPhoneInput';
+import {
+  DEFAULT_PHONE_COUNTRY,
+  parseStoredPhone,
+  validateCaregiverPhone,
+} from '../../utils/phoneCountries';
 
 const screenContent = {
   Security: {
@@ -269,7 +275,9 @@ const SettingsDetailScreen = ({ navigation, route }) => {
   const [devices, setDevices] = useState(content.devices || []);
   const [userId, setUserId] = useState(null);
   const [caregiverName, setCaregiverName] = useState('');
-  const [caregiverPhone, setCaregiverPhone] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState(DEFAULT_PHONE_COUNTRY);
+  const [phoneNational, setPhoneNational] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [saving, setSaving] = useState(false);
   const [toggles, setToggles] = useState(
     content.toggles.reduce((acc, t) => ({ ...acc, [t.id]: t.default }), {}),
@@ -296,7 +304,10 @@ const SettingsDetailScreen = ({ navigation, route }) => {
         const name = user?.caregiver_name || cfg.caregiverName || '';
         const phone = user?.caregiver_phone || cfg.caregiverPhone || '';
         setCaregiverName(name);
-        setCaregiverPhone(phone);
+        const parsed = parseStoredPhone(phone);
+        setPhoneCountry(parsed.country);
+        setPhoneNational(parsed.national);
+        setPhoneError('');
 
         if (title === 'SMS Notifications') {
           setInfo([{ label: 'Caregiver Number', value: phone || 'Not set' }]);
@@ -340,11 +351,14 @@ const SettingsDetailScreen = ({ navigation, route }) => {
   }, [title]);
 
   const saveCaregiver = async () => {
-    if (!caregiverName.trim() || !caregiverPhone.trim()) {
-      Alert.alert(
-        'Missing details',
-        'Enter both caregiver name and phone number.',
-      );
+    if (!caregiverName.trim()) {
+      Alert.alert('Missing details', 'Enter the caregiver name.');
+      return;
+    }
+    const phoneCheck = validateCaregiverPhone(phoneCountry, phoneNational);
+    if (!phoneCheck.ok) {
+      setPhoneError(phoneCheck.error);
+      Alert.alert('Invalid phone number', phoneCheck.error);
       return;
     }
     if (!userId) {
@@ -352,10 +366,11 @@ const SettingsDetailScreen = ({ navigation, route }) => {
       return;
     }
     setSaving(true);
+    setPhoneError('');
     try {
       const updated = await api.updateUser(userId, {
         caregiver_name: caregiverName.trim(),
-        caregiver_phone: caregiverPhone.trim(),
+        caregiver_phone: phoneCheck.e164,
       });
       await saveApiConfig({
         caregiverName: updated.caregiver_name,
@@ -374,7 +389,10 @@ const SettingsDetailScreen = ({ navigation, route }) => {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <KeyboardScreen
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      extraOffset={8}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
       {/* Header */}
@@ -438,14 +456,19 @@ const SettingsDetailScreen = ({ navigation, route }) => {
               placeholderTextColor="#9CA3AF"
             />
             <View style={styles.divider} />
-            <TextInput
-              style={styles.textInput}
-              value={caregiverPhone}
-              onChangeText={setCaregiverPhone}
-              placeholder="+233…"
-              placeholderTextColor="#9CA3AF"
-              keyboardType="phone-pad"
-            />
+            <View style={styles.phoneBlock}>
+              <CaregiverPhoneInput
+                country={phoneCountry}
+                national={phoneNational}
+                onChangeCountry={setPhoneCountry}
+                onChangeNational={text => {
+                  setPhoneNational(text);
+                  setPhoneError('');
+                }}
+                error={phoneError}
+                placeholder="e.g. 598833244"
+              />
+            </View>
             <TouchableOpacity
               style={styles.saveButton}
               onPress={saveCaregiver}
@@ -540,7 +563,7 @@ const SettingsDetailScreen = ({ navigation, route }) => {
       )}
 
       <View style={{ height: 40 }} />
-    </ScrollView>
+    </KeyboardScreen>
   );
 };
 
@@ -548,7 +571,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F3F4F6',
+  },
+  scrollContent: {
     paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  phoneBlock: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   header: {
     flexDirection: 'row',

@@ -108,7 +108,7 @@ const FaceEnrollScreen = ({navigation}) => {
 
       <Text style={styles.title}>Face Enrolment (Hub)</Text>
       <Text style={styles.subtitle}>
-        Biometrics are captured by the Raspberry Pi camera â€” not this phone.
+        Biometrics are captured by the Raspberry Pi camera.
         Stand in front of the dispenser when you tap Start.
       </Text>
 
@@ -150,7 +150,7 @@ const FaceEnrollScreen = ({navigation}) => {
           {enrollState === 'ready' || enrollState === 'error'
             ? 'START HUB FACE ENROLMENT'
             : enrollState === 'scanning'
-              ? 'ENROLLING ON HUBâ€¦'
+              ? 'ENROLLING ON HUB'
               : 'FACE ENROLLED'}
         </Text>
       </TouchableOpacity>
@@ -176,7 +176,7 @@ const FaceEnrollScreen = ({navigation}) => {
                 ? styles.awaitingTextDone
                 : styles.awaitingText
             }>
-            {enrollState === 'done' ? 'CONTINUE â†’' : 'AWAITING FACE ENROL'}
+            {enrollState === 'done' ? 'CONTINUE' : 'AWAITING FACE ENROL'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -184,7 +184,7 @@ const FaceEnrollScreen = ({navigation}) => {
       {enrollState === 'done' && (
         <TouchableOpacity style={styles.skipLink} onPress={goNextAfterFace}>
           <Text style={styles.skipLinkText}>
-            Voice is optional on PC â€” continue when face is enrolled
+            Voice is optional on PC continue when face is enrolled
           </Text>
         </TouchableOpacity>
       )}
@@ -194,7 +194,7 @@ const FaceEnrollScreen = ({navigation}) => {
           style={styles.skipFaceButton}
           onPress={() => navigation.navigate('EnrollSuccess')}>
           <Text style={styles.skipFaceText}>
-            SKIP BIOMETRICS FOR NOW â†’
+            SKIP BIOMETRICS FOR NOW
           </Text>
         </TouchableOpacity>
       )}

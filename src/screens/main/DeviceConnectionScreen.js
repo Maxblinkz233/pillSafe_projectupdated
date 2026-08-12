@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
@@ -20,6 +19,7 @@ import {
   saveApiConfig,
 } from '../../services/config';
 import {api} from '../../services/api';
+import KeyboardScreen from '../../components/KeyboardScreen';
 
 const DeviceConnectionScreen = ({navigation, route}) => {
   const authIntent = route?.params?.authIntent || null;
@@ -221,7 +221,10 @@ const DeviceConnectionScreen = ({navigation, route}) => {
   }
 
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardScreen
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      extraOffset={8}>
       <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
 
       <View style={styles.header}>
@@ -409,7 +412,7 @@ const DeviceConnectionScreen = ({navigation, route}) => {
       </View>
 
       <View style={{height: 40}} />
-    </ScrollView>
+    </KeyboardScreen>
   );
 };
 
@@ -417,7 +420,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F3F4F6',
+  },
+  scrollContent: {
     paddingHorizontal: 16,
+    paddingBottom: 24,
   },
   centered: {
     alignItems: 'center',

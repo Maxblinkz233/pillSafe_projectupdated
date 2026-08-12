@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { ChevronLeft, Trash2, Wifi, User } from 'lucide-react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, CommonActions } from '@react-navigation/native';
 import {
   clearSessionUser,
   getApiConfig,
@@ -88,8 +88,16 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const onSignOut = async () => {
-    await signOutLocal();
-    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    try {
+      await signOutLocal();
+    } finally {
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{name: 'Login'}],
+        }),
+      );
+    }
   };
 
   const name = hubUser?.full_name || cfg?.userName || 'Patient';
